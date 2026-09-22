@@ -81,7 +81,10 @@ func upgrade() -> void:
 
 
 func total_invested() -> int:
-	return Config.tower_total_invested(type, tier)
+	var total := 0
+	for t in range(1, tier + 1):
+		total += Boons.tower_cost(type, t)
+	return total
 
 
 ## What it costs to put this emplacement back to full. Free when undamaged.
@@ -395,70 +398,122 @@ func _draw_archer() -> void:
 	draw_line(Vector2(-30, -h - 24), Vector2(30, -h - 24), dark, 2.5)
 	var archers := 1 if tier < 3 else 2
 	var draw_amt := reload_ratio() if _target != null else 0.0
+	# The crew turn to face whatever they are shooting at. Archers that always
+	# faced right were the clearest possible sign that nothing on screen was
+	# paying attention to the fight.
+	var aim := _aim if _target != null else -PI * 0.5
+	var face: float = 1.0 if cos(aim) >= 0.0 else -1.0
 	for i in range(archers):
 		var ax := 0.0 if archers == 1 else (-14.0 + i * 28.0)
 		var top := -h - 12.0
 		var sway := sin(_t * 1.6 + _idle_seed + i) * 1.2
-		draw_circle(Vector2(ax, top - 16 + sway), 11, Config.C_GOOD)
-		draw_circle(Vector2(ax - 3, top - 19 + sway), 7, Config.C_GOOD.lightened(0.15))
-		draw_circle(Vector2(ax, top - 33 + sway), 8, Color("d9a372"))
-		draw_rect(Rect2(ax - 8, top - 40 + sway, 16, 5), Config.C_SAND_LIGHT)
-		var bc := Vector2(ax + 14, top - 22 + sway)
-		draw_arc(bc, 16, -1.35, 1.35, 10, dark, 3.0)
+		var root := Vector2(ax, top + sway)
+		draw_set_transform(root, 0.0, Vector2(face, 1.0))
+		draw_circle(Vector2(0, -18), 13, Config.C_GOOD)
+		draw_circle(Vector2(-3, -22), 9, Config.C_GOOD.lightened(0.15))
+		draw_circle(Vector2(0, -38), 10, Color("e3ab7a"))
+		draw_circle(Vector2(3, -40), 7, Color("e3ab7a").lightened(0.12))
+		draw_circle(Vector2(4, -38), 1.6, Color("15111c"))
+		draw_rect(Rect2(-10, -47, 20, 6), Config.C_SAND_LIGHT)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# Bow, swung round onto the line of fire. Lit timber, not the frame's
+		# dark: a bow the colour of the tower behind it simply is not there.
+		draw_set_transform(root + Vector2(0, -26), aim, Vector2.ONE)
+		var bc := Vector2(15, 0)
+		draw_arc(bc, 17, -1.35, 1.35, 10, Config.C_SAND_LIGHT.darkened(0.3), 3.6)
 		var nock := bc + Vector2(-4.0 - 6.0 * draw_amt, 0)
-		draw_line(bc + Vector2(cos(-1.35), sin(-1.35)) * 16, nock, Config.C_SAND_LIGHT, 1.5)
-		draw_line(bc + Vector2(cos(1.35), sin(1.35)) * 16, nock, Config.C_SAND_LIGHT, 1.5)
-		if draw_amt > 0.35:
-			draw_line(nock, bc + Vector2(14, 0), Config.C_WOOD, 2.0)
+		draw_line(bc + Vector2(cos(-1.35), sin(-1.35)) * 17, nock, Color("e8dcc0"), 1.8)
+		draw_line(bc + Vector2(cos(1.35), sin(1.35)) * 17, nock, Color("e8dcc0"), 1.8)
+		draw_line(nock, bc + Vector2(16, 0), Color("e8dcc0"), 2.2)
+		draw_colored_polygon(PackedVector2Array([
+			bc + Vector2(16, -3), bc + Vector2(24, 0), bc + Vector2(16, 3),
+		]), Config.C_IRON.lightened(0.2))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if tier >= 2:
-		var ry := -h - 44.0
+		# Clear of the archers: the old height put the eaves through their heads,
+		# which is why a tier-2 tower looked like an empty hut.
+		var ry := -h - 70.0
 		draw_colored_polygon(PackedVector2Array([Vector2(-40, ry + 16), Vector2(40, ry + 16), Vector2(0, ry - 18)]), dark)
 		draw_colored_polygon(PackedVector2Array([Vector2(-34, ry + 14), Vector2(34, ry + 14), Vector2(0, ry - 14)]), Config.C_THREAT_DARK.lerp(wood, 0.5))
 		draw_colored_polygon(PackedVector2Array([Vector2(-34, ry + 14), Vector2(0, ry + 14), Vector2(0, ry - 14)]), Color(Config.C_SAND_LIGHT, 0.12))
 		draw_line(Vector2(-42, ry + 16), Vector2(-32, -h - 26), dark, 4.0)
 		draw_line(Vector2(42, ry + 16), Vector2(32, -h - 26), dark, 4.0)
 	if tier >= 3:
-		_draw_pennant(Vector2(0, -h - 62.0), 34.0)
+		_draw_pennant(Vector2(0, -h - 96.0), 34.0)
 
 
 ## A walled post with a banner: the men themselves stand out on the road.
 func _draw_guard() -> void:
-	var stone := Config.C_SAND_DARK
-	var lit := Config.C_SAND_LIGHT.darkened(0.18)
+	# A gatehouse the garrison walks out of, not a decorative wall. The old
+	# version was a pale sandstone box with nothing happening on it, which is
+	# why the one emplacement that fields real men looked like scenery.
+	var stone := Config.C_SAND_DARK.darkened(0.22)
+	var lit := Config.C_SAND_DARK.lightened(0.18)
+	var shade := Config.C_SAND_DEEP.darkened(0.15)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-34, 12), Vector2(34, 12), Vector2(28, -34), Vector2(-28, -34),
+		Vector2(-36, 12), Vector2(36, 12), Vector2(30, -36), Vector2(-30, -36),
 	]), stone)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-34, 12), Vector2(-14, 12), Vector2(-12, -34), Vector2(-28, -34),
+		Vector2(2, 12), Vector2(36, 12), Vector2(30, -36), Vector2(2, -36),
 	]), lit)
-	# Course lines
 	for row in range(4):
-		draw_line(Vector2(-32 + row, 6 - row * 11), Vector2(32 - row, 6 - row * 11), Color(Config.C_SAND_DEEP, 0.4), 1.5)
-	# Parapet with merlons
-	draw_rect(Rect2(-36, -44, 72, 12), stone)
-	draw_rect(Rect2(-36, -44, 72, 3), lit)
-	var mx := -36.0
-	while mx < 30.0:
-		draw_rect(Rect2(mx, -56, 14, 13), stone)
-		draw_rect(Rect2(mx, -56, 14, 3), lit)
-		mx += 22.0
-	# Weapon rack against the wall
-	draw_line(Vector2(-24, -34), Vector2(-20, -66), Config.C_WOOD_DARK, 2.5)
-	draw_line(Vector2(-16, -34), Vector2(-13, -66), Config.C_WOOD_DARK, 2.5)
-	draw_colored_polygon(PackedVector2Array([Vector2(-22, -66), Vector2(-18, -74), Vector2(-16, -64)]), Config.C_IRON)
-	# Brazier so the post reads at night
+		draw_line(Vector2(-34 + row, 6 - row * 11), Vector2(34 - row, 6 - row * 11),
+			Color(shade, 0.45), 1.6)
+	# The sally port: an arched doorway, lit from inside. This is the detail
+	# that explains where the spearmen on the road came from.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-13, 12), Vector2(13, 12), Vector2(13, -14), Vector2(0, -24), Vector2(-13, -14),
+	]), Color("140d07"))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-9, 12), Vector2(9, 12), Vector2(9, -13), Vector2(0, -21), Vector2(-9, -13),
+	]), Color(Config.C_FIRE, 0.22))
+	draw_line(Vector2(-13, -14), Vector2(0, -24), shade, 3.0)
+	draw_line(Vector2(13, -14), Vector2(0, -24), shade, 3.0)
+	# Parapet with merlons.
+	draw_rect(Rect2(-38, -48, 76, 13), stone)
+	draw_rect(Rect2(-38, -48, 76, 3), lit)
+	var mx := -38.0
+	while mx < 32.0:
+		draw_rect(Rect2(mx, -61, 15, 14), stone)
+		draw_rect(Rect2(mx, -61, 15, 3), lit)
+		mx += 23.0
+	# A sentry on the wall, turning with the tower's aim. He is the emplacement's
+	# face: without him the post never looks crewed.
+	var sway := sin(_t * 1.3 + _idle_seed) * 1.5
+	# The sentry watches the road: he turns toward whatever the post has
+	# noticed, and looks down the climb when there is nothing yet.
+	var look := _aim if _target != null else -PI * 0.5
+	var sface: float = 1.0 if cos(look) >= 0.0 else -1.0
+	draw_set_transform(Vector2(17.0 * sface, sway), 0.0, Vector2(sface, 1.0))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-8, -61), Vector2(8, -61), Vector2(7, -82), Vector2(-7, -82),
+	]), Config.C_GOOD.darkened(0.15))
+	draw_circle(Vector2(1, -89), 8.0, Color("e3ab7a"))
+	draw_circle(Vector2(3, -91), 6.0, Color("e3ab7a").lightened(0.12))
+	draw_circle(Vector2(4, -89), 1.6, Color("15111c"))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-8, -93), Vector2(9, -93), Vector2(1, -104),
+	]), Config.C_IRON)
+	draw_line(Vector2(-9, -56), Vector2(-6, -112), Config.C_WOOD, 3.2)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-6, -112), Vector2(-11, -122), Vector2(-1, -122),
+	]), Config.C_IRON.lightened(0.2))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Brazier so the post reads at night.
 	var f := 1.0 + 0.18 * sin(_t * 9.0 + _idle_seed)
-	draw_rect(Rect2(14, -58, 16, 6), Config.C_IRON_DARK)
-	draw_circle(Vector2(22, -62), 12 * f, Color(Config.C_FIRE, 0.16))
-	draw_circle(Vector2(22, -62), 6 * f, Config.C_FIRE)
-	# Strength banner: one stripe per man still standing
+	draw_rect(Rect2(-30, -62, 16, 6), Config.C_IRON_DARK)
+	draw_circle(Vector2(-22, -66), 13 * f, Color(Config.C_FIRE, 0.18))
+	draw_circle(Vector2(-22, -66), 6.5 * f, Config.C_FIRE)
+	draw_circle(Vector2(-23, -68), 3.0 * f, Config.C_FIRE_HOT)
+	# Strength banner: one stripe per man still standing.
 	var g: Dictionary = Config.TOWERS[type]["garrison"]
 	var want := Boons.garrison_count(int(g["count"])) + (tier - 1)
 	for i in range(want):
 		var alive_i := i < defenders.size() and is_instance_valid(defenders[i]) and defenders[i].alive
-		draw_rect(Rect2(-34 + i * 12, -30, 9, 5), Config.C_GOOD if alive_i else Color(0.2, 0.2, 0.22, 0.8))
+		draw_rect(Rect2(-34 + i * 12, -33, 9, 6),
+			Config.C_GOOD if alive_i else Color(0.22, 0.22, 0.24, 0.85))
 	if tier >= 3:
-		_draw_pennant(Vector2(0, -56.0), 32.0)
+		_draw_pennant(Vector2(-20, -61.0), 34.0)
 
 
 func _draw_oil() -> void:

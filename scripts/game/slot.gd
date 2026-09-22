@@ -25,47 +25,52 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+
 func _draw() -> void:
-	# An empty plinth is scenery, not a button: it stays dark so the emplacements
-	# and the attackers own the contrast. It only lifts when it is being offered.
-	var lift: float = 1.0 if tower != null else (0.55 if hint else 0.28)
-	var deep := Config.C_SAND_DEEP.darkened(0.35 * (1.0 - lift))
-	var mid := Config.C_SAND_DARK.darkened(0.4 * (1.0 - lift))
-	var top := Config.C_SAND_LIGHT.darkened(0.08 + 0.4 * (1.0 - lift))
+	# An empty plinth is furniture. It is cut from the mound it stands on, one
+	# step lighter and no more, so twenty of them do not out-shout the column
+	# climbing past. It only lifts while the build sheet is offering it.
+	var lift: float = 1.0 if tower != null else (0.62 if hint else 0.0)
+	var deep: Color = Config.C_GROUND_LOW.lerp(Config.C_SAND_DEEP, lift)
+	var mid: Color = Config.C_PLINTH.lerp(Config.C_SAND_DARK, lift)
+	var top: Color = Config.C_PLINTH_TOP.lerp(Config.C_SAND_LIGHT, lift)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2(1.0, 0.62))
-	draw_circle(Vector2(0, 10), 42, Color(0.02, 0.02, 0.05, 0.38))
+	draw_circle(Vector2(0, 10), 42, Color(0.02, 0.02, 0.05, 0.45))
 	draw_circle(Vector2.ZERO, 40, deep)
 	draw_circle(Vector2(0, -6), 40, mid)
 	draw_circle(Vector2(0, -8), 32, top)
-	draw_circle(Vector2(-8, -12), 20, top.lightened(0.06))
+	draw_circle(Vector2(-8, -12), 20, top.lightened(0.05))
 	# Mortar joints on the top face
-	for i in range(6):
-		var a := float(i) / 6.0 * TAU + 0.3
-		draw_line(Vector2(0, -8), Vector2(0, -8) + Vector2(cos(a), sin(a)) * 32.0, Color(Config.C_SAND_DEEP, 0.4), 1.6)
-	draw_arc(Vector2(0, -8), 32, 0, TAU, 36, Color(Config.C_SAND_DEEP, 0.6), 2.0)
+	for i in range(3):
+		var a := float(i) / 3.0 * TAU + 0.3
+		draw_line(Vector2(0, -8), Vector2(0, -8) + Vector2(cos(a), sin(a)) * 32.0, Color(deep, 0.45), 1.8)
+	draw_arc(Vector2(0, -8), 32, 0, TAU, 36, Color(deep, 0.7), 2.0)
 	# Chisel speckle on the cut face, keyed to the slot so it never shimmers.
-	Gfx.draw_grain(self, Rect2(-30, -30, 60, 44), 44, Color(Config.C_SAND_DEEP, 0.3), 400 + index, 0.8, 2.0)
-	Gfx.draw_grain(self, Rect2(-30, -30, 60, 44), 22, Color(Config.C_SAND_LIGHT, 0.22), 600 + index, 0.8, 1.6)
+	# Deliberately sparse: at 58 specks a plinth, twenty of these were 1,324
+	# draw calls a frame — 45% of everything left after the background bake —
+	# for texture that is invisible at this size. Measured with --hide=slots.
+	Gfx.draw_grain(self, Rect2(-28, -28, 56, 40), 7, Color(deep, 0.4), 400 + index, 1.2, 2.6)
+	Gfx.draw_grain(self, Rect2(-28, -28, 56, 40), 4, Color(top.lightened(0.25), 0.2), 600 + index, 1.0, 2.0)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	# Re-light the plinth when something is standing on it.
 	if tower == null and rubble:
 		_draw_rubble()
 	elif tower == null:
-		var c := Config.C_SAND_DEEP
+		# The plus is an affordance, not decoration: barely there until the
+		# build sheet is open, then gold.
+		var c: Color = Color(Config.C_ROCK, 0.85) if hint else Color(top.lightened(0.18), 0.5)
 		draw_line(Vector2(-11, -5), Vector2(11, -5), c, 4.0)
 		draw_line(Vector2(0, -16), Vector2(0, 6), c, 4.0)
 	if hint and tower == null:
 		_draw_hint()
 
 
+## Twelve of these are on screen at once during prep, so it is one slow ring
+## and a wash. The expanding pulse each plinth used to fire made the whole
+## mound strobe.
 func _draw_hint() -> void:
-	var pulse := fmod(_t * 0.75, 1.0)
-	# An expanding ring that fades, plus a steady breathing ring.
-	var r := lerpf(30.0, 72.0, pulse)
-	draw_arc(Vector2(0, -4), r, 0, TAU, 44, Color(Config.C_ROCK, 0.55 * (1.0 - pulse)), 5.0 * (1.0 - pulse) + 1.0)
-	var a := 0.35 + 0.35 * sin(_t * 4.0)
-	draw_arc(Vector2(0, -4), 48 + 4 * sin(_t * 4.0), 0, TAU, 40, Color(Config.C_ROCK, a), 4.0)
-	draw_circle(Vector2(0, -6), 26, Color(Config.C_ROCK, 0.10 + 0.05 * sin(_t * 4.0)))
+	var a := 0.26 + 0.20 * sin(_t * 2.6)
+	draw_arc(Vector2(0, -6), 44, 0, TAU, 40, Color(Config.C_ROCK, a), 3.0)
+	draw_circle(Vector2(0, -6), 26, Color(Config.C_ROCK, 0.07 + 0.04 * sin(_t * 2.6)))
 
 
 ## What is left after a manjaniq stone or a sapper finds the emplacement.

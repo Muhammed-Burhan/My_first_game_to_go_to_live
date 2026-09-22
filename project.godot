@@ -24,6 +24,7 @@ Config="*res://scripts/autoload/config.gd"
 Save="*res://scripts/autoload/save_data.gd"
 Boons="*res://scripts/autoload/boons.gd"
 Game="*res://scripts/autoload/game_state.gd"
+Meta="*res://scripts/autoload/meta.gd"
 Sfx="*res://scripts/autoload/sfx.gd"
 Leaderboard="*res://scripts/autoload/leaderboard.gd"
 

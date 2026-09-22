@@ -144,17 +144,25 @@ func _draw() -> void:
 	draw_circle(Vector2(0, -24 + bob), 9, Color("d9a372"))
 	draw_circle(Vector2(0, -28 + bob), 9, Config.C_IRON_DARK)
 	draw_rect(Rect2(-9, -28 + bob, 18, 4), Config.C_IRON)
-	# Spear, thrust forward on the swing
-	var reach_px := 16.0 + 16.0 * _swing
-	var sy := -12.0 + bob
-	draw_line(Vector2(-12, sy + 10), Vector2(reach_px, sy - 2), Config.C_WOOD, 3.5)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(reach_px, sy - 6), Vector2(reach_px + 11, sy - 2), Vector2(reach_px, sy + 2),
-	]), Config.C_IRON)
 	# Small shield on the off arm
 	draw_circle(Vector2(-9, -8 + bob), 11, Config.C_WOOD_DARK)
 	draw_circle(Vector2(-9, -8 + bob), 8, Config.C_WOOD)
 	draw_circle(Vector2(-9, -8 + bob), 3, Config.C_ROCK)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# The spear goes where the man is actually looking. Flipping the whole
+	# figure left or right was the only aiming these had, so a spearman
+	# fighting someone above him still stabbed flat along the ground.
+	var jab := -12.0 + bob
+	var shoulder := Vector2(0, jab)
+	var ang := -0.12
+	if target != null and is_instance_valid(target):
+		ang = (target.global_position - global_position - shoulder).angle()
+	draw_set_transform(shoulder, ang, Vector2.ONE)
+	var reach_px := 28.0 + 16.0 * _swing
+	draw_line(Vector2(-26, 0), Vector2(reach_px, 0), Config.C_WOOD, 3.5)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(reach_px, -4), Vector2(reach_px + 11, 0), Vector2(reach_px, 4),
+	]), Config.C_IRON)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if hp < max_hp:
 		Gfx.draw_bar(self, Rect2(-17, -46, 34, 6), hp / max_hp, Color(0, 0, 0, 0.6), Config.C_GOOD)

@@ -153,12 +153,31 @@ static func style_panel(bg: Color, line: Color, radius: int = 26, border: int = 
 
 
 ## Text with an outline, centred in `width` at `pos`. Returns nothing; pure draw.
+## Defaults to the heavy UI face; pass `Fonts.display()` for a title.
 static func draw_text(ci: CanvasItem, pos: Vector2, text: String, size: int, col: Color,
-		align: int = HORIZONTAL_ALIGNMENT_CENTER, width: float = -1.0, outline: int = 7) -> void:
-	var font := ThemeDB.fallback_font
+		align: int = HORIZONTAL_ALIGNMENT_CENTER, width: float = -1.0, outline: int = 7,
+		font: Font = null) -> void:
+	if font == null:
+		font = Fonts.ui(Fonts.W_BLACK)
 	if outline > 0:
 		ci.draw_string_outline(font, pos, text, align, width, size, outline, Color(0, 0, 0, 0.85))
 	ci.draw_string(font, pos, text, align, width, size, col)
+
+
+## Truncate `text` with an ellipsis so it fits `max_width` at `size`. Godot's
+## draw_string takes a width for alignment but will happily overflow it, which
+## is how contract copy ended up running through its own progress bar.
+static func fit_text(text: String, size: int, max_width: float, font: Font = null) -> String:
+	if font == null:
+		font = Fonts.ui(Fonts.W_MED)
+	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_width:
+		return text
+	var out := text
+	while out.length() > 1:
+		out = out.substr(0, out.length() - 1)
+		if font.get_string_size(out + "…", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_width:
+			return out.strip_edges() + "…"
+	return out
 
 
 ## A rounded-rect sprite with a vertical gradient and a rim, baked once and

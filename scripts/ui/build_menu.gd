@@ -140,12 +140,12 @@ func _clear() -> void:
 
 func _refresh() -> void:
 	for c in _cards:
-		c.affordable = Game.can_afford(Config.tower_cost(c.tower_type, 1))
+		c.affordable = Game.can_afford(Boons.tower_cost(c.tower_type, 1))
 		c.queue_redraw()
 	if _tower == null or not is_instance_valid(_tower):
 		return
 	var maxed := _tower.tier >= Config.MAX_TIER
-	var up_cost := 0 if maxed else Config.tower_cost(_tower.type, _tower.tier + 1)
+	var up_cost := 0 if maxed else Boons.tower_cost(_tower.type, _tower.tier + 1)
 	_upgrade_btn.text = "MAX TIER" if maxed else "UPGRADE  %d" % up_cost
 	_upgrade_btn.disabled = maxed or not Game.can_afford(up_cost)
 	var rep := _tower.repair_cost()
@@ -171,7 +171,7 @@ func _on_build(type: int) -> void:
 	var s := _slot
 	if s == null:
 		return
-	if not Game.can_afford(Config.tower_cost(type, 1)):
+	if not Game.can_afford(Boons.tower_cost(type, 1)):
 		Sfx.play("deny")
 		return
 	close()
@@ -221,7 +221,7 @@ class Sheet extends Control:
 			Color(Config.C_UI_LINE, 0.5), false)
 		Gfx.draw_text(self, Vector2(24, 68), title, 40, Config.C_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, 7)
 		if subtitle != "":
-			var w := ThemeDB.fallback_font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 40).x
+			var w := Fonts.ui(Fonts.W_BLACK).get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 40).x
 			Gfx.draw_text(self, Vector2(40 + w, 66), subtitle, 28, Config.C_TEXT_DIM,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 5)
 
@@ -266,7 +266,7 @@ class TowerCard extends Control:
 			Color(Config.C_TEXT, a), HORIZONTAL_ALIGNMENT_CENTER, size.x, 5)
 		var pill := Rect2(18, 210, size.x - 36, 40)
 		Gfx.draw_bar(self, pill, 1.0, Color(0, 0, 0, 0), Color(0.02, 0.03, 0.07, 0.8), false)
-		Gfx.draw_text(self, Vector2(0, 240), str(int(t["cost"])), 30,
+		Gfx.draw_text(self, Vector2(0, 240), str(Boons.tower_cost(tower_type, 1)), 30,
 			Config.C_ROCK if affordable else Config.C_THREAT, HORIZONTAL_ALIGNMENT_CENTER, size.x, 5)
 		# A one-word role, so the row reads without reading.
 		var role := "SPLASH"

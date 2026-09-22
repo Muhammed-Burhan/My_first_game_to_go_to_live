@@ -10,6 +10,7 @@ var _rock_label: Label
 var _wave_label: Label
 var _tier_label: Label
 var _lives: LivesIcons
+var _auto_btn: Button
 var _speed_btn: Button
 var _pause_btn: Button
 var _start_btn: Button
@@ -39,50 +40,67 @@ func _ready() -> void:
 	add_child(_bar)
 
 	var rock_icon := RockIcon.new()
-	rock_icon.position = Vector2(74, 96)
+	rock_icon.position = Vector2(78, 68)
 	add_child(rock_icon)
-	_rock_label = _label("150", 58, Vector2(114, 56), Config.C_ROCK)
-	_rock_label.size = Vector2(240, 80)
+	_rock_label = _label("150", 50, Vector2(114, 40), Config.C_ROCK)
+	_rock_label.size = Vector2(160, 56)
 	add_child(_rock_label)
 
-	_lives = LivesIcons.new()
-	_lives.position = Vector2(356, 52)
-	_lives.size = Vector2(250, 90)
-	add_child(_lives)
-
-	_wave_label = _label("WAVE 1/10", 42, Vector2(600, 50), Config.C_TEXT)
-	_wave_label.size = Vector2(230, 52)
+	_wave_label = _label("WAVE 1/10", 40, Vector2(396, 30), Config.C_TEXT)
+	_wave_label.size = Vector2(288, 46)
 	_wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(_wave_label)
 
-	_tier_label = _label("", 24, Vector2(600, 104), Config.C_ROCK)
-	_tier_label.size = Vector2(230, 36)
+	_tier_label = _label("", 22, Vector2(396, 76), Config.C_ROCK)
+	_tier_label.size = Vector2(288, 30)
 	_tier_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(_tier_label)
 
+	# AUTO hands the gatehouse repeater to the game while both hands are busy
+	# building. It is the weaker option on purpose (see commander.gd), so it
+	# sits beside the speed toggle as a convenience, not above it.
+	_auto_btn = Button.new()
+	_auto_btn.text = "AUTO"
+	_auto_btn.position = Vector2(788, 24)
+	_auto_btn.size = Vector2(84, 84)
+	_auto_btn.add_theme_font_size_override("font_size", 24)
+	_auto_btn.pressed.connect(_on_auto)
+	add_child(_auto_btn)
+	UiTheme.add_press_feel(_auto_btn)
+	UiTheme.make_compact(_auto_btn)
+
 	_speed_btn = Button.new()
 	_speed_btn.text = "1x"
-	_speed_btn.position = Vector2(856, 42)
-	_speed_btn.size = Vector2(100, 100)
-	_speed_btn.add_theme_font_size_override("font_size", 44)
+	_speed_btn.position = Vector2(880, 24)
+	_speed_btn.size = Vector2(84, 84)
+	_speed_btn.add_theme_font_size_override("font_size", 36)
 	_speed_btn.pressed.connect(_on_speed)
 	add_child(_speed_btn)
 	UiTheme.add_press_feel(_speed_btn)
+	UiTheme.make_compact(_speed_btn)
 
 	_pause_btn = Button.new()
 	_pause_btn.text = "❚❚"
-	_pause_btn.position = Vector2(966, 42)
-	_pause_btn.size = Vector2(90, 100)
-	_pause_btn.add_theme_font_size_override("font_size", 34)
+	_pause_btn.position = Vector2(972, 24)
+	_pause_btn.size = Vector2(84, 84)
+	_pause_btn.add_theme_font_size_override("font_size", 30)
 	_pause_btn.pressed.connect(func():
 		Sfx.play("click")
 		pause_requested.emit())
 	add_child(_pause_btn)
 	UiTheme.add_press_feel(_pause_btn)
+	UiTheme.make_compact(_pause_btn)
+
+	# Second row: lives on the left, the wave's progress taking the rest. Both
+	# used to be crammed into the same band as the counters.
+	_lives = LivesIcons.new()
+	_lives.position = Vector2(24, 118)
+	_lives.size = Vector2(230, 46)
+	add_child(_lives)
 
 	_progress = WaveProgress.new()
-	_progress.position = Vector2(40, 186)
-	_progress.size = Vector2(1000, 34)
+	_progress.position = Vector2(268, 130)
+	_progress.size = Vector2(788, 22)
 	_progress.visible = false
 	add_child(_progress)
 
@@ -139,6 +157,11 @@ func _ready() -> void:
 
 func bind(lvl: Level) -> void:
 	level = lvl
+	# Carry the preference across runs: someone who plays on AUTO wants it on
+	# next time, not to rediscover the button every launch.
+	if lvl.commander != null:
+		lvl.commander.auto = bool(Save.data.get("commander_auto", false))
+	_refresh_auto()
 	level.phase_changed.connect(_on_phase)
 	level.wave_started.connect(_on_wave_started)
 	level.milestone.connect(_on_milestone)
@@ -187,6 +210,7 @@ func _process(delta: float) -> void:
 			if level.commander != null:
 				_heat.heat = level.commander.heat
 				_heat.locked = level.commander.locked > 0.0
+				_heat.auto = level.commander.auto
 				_heat.queue_redraw()
 			_last_countdown = -1
 			_start_btn.visible = false
@@ -289,6 +313,20 @@ func _on_speed_changed(s: float) -> void:
 	_speed_btn.text = "%dx" % int(s)
 
 
+func _on_auto() -> void:
+	if level == null or level.commander == null:
+		return
+	Sfx.play("click")
+	level.commander.set_auto(not level.commander.auto)
+	_refresh_auto()
+
+
+## Gold when the gunner has the trigger, plain when the player does.
+func _refresh_auto() -> void:
+	var on := level != null and level.commander != null and level.commander.auto
+	UiTheme.make_compact(_auto_btn, on)
+
+
 func _on_speed() -> void:
 	Sfx.play("click")
 	Game.toggle_speed()
@@ -327,17 +365,28 @@ func reset() -> void:
 # ------------------------------------------------------------------ widgets
 
 ## The stone-and-gold bar behind the readouts.
+## Two chips, not a plate. A full-width slab is the heaviest possible way to
+## show two numbers, and it was taking 150px off the top of the mound to do it
+## — on a portrait phone that is the part of the board you most want to see.
 class TopBar extends Control:
-	var _box: StyleBoxTexture
+	var _rock_box: StyleBoxTexture
+	var _wave_box: StyleBoxTexture
+	var _lives_box: StyleBoxTexture
 
 	func _ready() -> void:
-		_box = Gfx.gradient_box(Color(0.09, 0.13, 0.23, 0.92), Color(0.03, 0.05, 0.11, 0.95), Config.C_UI_LINE, 3.0, 28.0)
+		_rock_box = Gfx.gradient_box(Color(0.11, 0.15, 0.26, 0.9), Color(0.03, 0.05, 0.11, 0.94),
+			Config.C_ROCK, 3.0, 26.0)
+		_wave_box = Gfx.gradient_box(Color(0.08, 0.11, 0.21, 0.84), Color(0.025, 0.04, 0.09, 0.9),
+			Color(Config.C_UI_LINE, 0.6), 2.5, 22.0)
+		_lives_box = Gfx.gradient_box(Color(0.07, 0.09, 0.17, 0.78), Color(0.02, 0.03, 0.07, 0.86),
+			Color(Config.C_THREAT, 0.45), 2.0, 18.0)
 
 	func _draw() -> void:
-		draw_style_box(_box, Rect2(Vector2.ZERO, size))
-		# Divider ticks between the three readouts.
-		for x in [330.0, 590.0, 830.0]:
-			draw_line(Vector2(x, 26), Vector2(x, size.y - 26), Color(Config.C_UI_LINE, 0.25), 2.0)
+		draw_style_box(_rock_box, Rect2(4, 4, 250, 88))
+		draw_style_box(_wave_box, Rect2(376, 4, 288, 88))
+		# The lives row gets its own pill, or the shields read as loose
+		# stickers dropped on the mound.
+		draw_style_box(_lives_box, Rect2(4, 98, 230, 46))
 
 
 class RockIcon extends Node2D:
@@ -379,14 +428,14 @@ class LivesIcons extends Control:
 			queue_redraw()
 
 	func _draw() -> void:
-		var step: float = 68.0 if total <= 3 else 50.0
+		var step: float = 48.0 if total <= 3 else 38.0
 		for i in range(total):
-			var c := Vector2(30 + i * step, 44)
+			var c := Vector2(24 + i * step, size.y * 0.5)
 			var on := i < lives
 			var col := Config.C_THREAT if on else Color(0.16, 0.16, 0.2, 0.85)
 			if not on and flash > 0.0 and i == lives:
 				col = Config.C_THREAT.lerp(Color(0.16, 0.16, 0.2), 1.0 - flash)
-			var sc: float = 1.0 if total <= 3 else 0.78
+			var sc: float = 0.66 if total <= 3 else 0.52
 			if gain > 0.0 and i == lives - 1:
 				sc *= 1.0 + 0.3 * gain
 			draw_set_transform(c, 0.0, Vector2(sc, sc))
@@ -414,31 +463,52 @@ class WaveProgress extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
-		Gfx.draw_bar(self, Rect2(Vector2.ZERO, size), value, Color(0, 0, 0, 0.55), Config.C_GOOD)
-		draw_arc(Vector2(size.y * 0.5, size.y * 0.5), size.y * 0.5, PI * 0.5, PI * 1.5, 16, Color(Config.C_UI_LINE, 0.5), 2.0)
-		draw_arc(Vector2(size.x - size.y * 0.5, size.y * 0.5), size.y * 0.5, -PI * 0.5, PI * 0.5, 16, Color(Config.C_UI_LINE, 0.5), 2.0)
-		Gfx.draw_text(self, Vector2(0, size.y - 9), "WAVE CLEARED  %d%%" % int(value * 100.0), 22,
-			Color(Config.C_TEXT, 0.9), HORIZONTAL_ALIGNMENT_CENTER, size.x, 6)
+		# No caption. A percentage printed inside a 22px bar is unreadable at
+		# arm’s length, and the bar is already saying the same thing.
+		Gfx.draw_bar(self, Rect2(Vector2.ZERO, size), value, Color(0, 0, 0, 0.6), Config.C_GOOD)
+		for i in range(1, 8):
+			var x := size.x * float(i) / 8.0
+			draw_line(Vector2(x, 3), Vector2(x, size.y - 3), Color(0, 0, 0, 0.3), 2.0)
 
 
 ## The commander's barrel temperature. Red means locked out.
 class HeatMeter extends Control:
 	var heat := 0.0
 	var locked := false
+	var auto := false
+	var _t := 0.0
 
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		visible = false
 
+	func _process(delta: float) -> void:
+		_t += delta
+		if locked:
+			queue_redraw()
+
 	func _draw() -> void:
-		var bar := Rect2(0, 26, size.x, 26)
-		var fg: Color = Config.C_THREAT if locked else Config.C_GOOD.lerp(Config.C_FIRE, heat)
-		Gfx.draw_bar(self, bar, heat, Color(0, 0, 0, 0.55), fg)
-		draw_arc(Vector2(13, 39), 13, PI * 0.5, PI * 1.5, 14, Color(Config.C_UI_LINE, 0.5), 2.0)
-		draw_arc(Vector2(size.x - 13, 39), 13, -PI * 0.5, PI * 0.5, 14, Color(Config.C_UI_LINE, 0.5), 2.0)
-		var label := "BARREL OVERHEATED" if locked else "HOLD TO FIRE"
-		Gfx.draw_text(self, Vector2(0, 20), label, 22,
-			Config.C_THREAT if locked else Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER, size.x, 5)
+		# A plate behind it: this is the one control the player holds, and its
+		# caption was previously printed straight over the attackers.
+		Gfx.draw_panel(self, Rect2(-18, 6, size.x + 36, size.y - 4),
+			Color(0.02, 0.03, 0.07, 0.62), Color(Config.C_UI_LINE, 0.28), 26.0, 2.0)
+		var bar := Rect2(0, 30, size.x, 24)
+		var fg: Color = Config.C_GOOD.lerp(Config.C_FIRE, clampf(heat * 1.25, 0.0, 1.0))
+		if locked:
+			fg = Config.C_THREAT.lerp(Config.C_FIRE_HOT, 0.5 + 0.5 * sin(_t * 12.0))
+		Gfx.draw_bar(self, bar, 1.0, Color(0, 0, 0, 0), Color(0.02, 0.03, 0.07, 0.8), false)
+		# A marked red zone, so the lockout can be seen coming instead of being
+		# discovered when the gun stops.
+		draw_rect(Rect2(bar.position.x + bar.size.x * 0.78, bar.position.y,
+			bar.size.x * 0.22, bar.size.y), Color(Config.C_THREAT, 0.28))
+		Gfx.draw_bar(self, bar, heat, Color(0, 0, 0, 0), fg)
+		for i in range(1, 5):
+			var x := bar.size.x * float(i) / 5.0
+			draw_line(Vector2(x, bar.position.y + 4), Vector2(x, bar.end.y - 4), Color(0, 0, 0, 0.35), 2.0)
+		var label := "OVERHEATED" if locked else ("AUTO FIRE · HOLD TO TAKE OVER" if auto else "HOLD ANYWHERE TO FIRE")
+		Gfx.draw_text(self, Vector2(0, 22), label, 24,
+			Config.C_THREAT if locked else Color(Config.C_TEXT, 0.72),
+			HORIZONTAL_ALIGNMENT_CENTER, size.x, 6, Fonts.ui(Fonts.W_BLACK, 3))
 
 
 ## Kill streak: a number that grows and a ring that drains.
@@ -555,7 +625,7 @@ class WavePreview extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
-		var font := ThemeDB.fallback_font
+		var font := Fonts.ui(Fonts.W_BLACK)
 		draw_string_outline(font, Vector2(0, 34), "NEXT", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, 6, Color(0, 0, 0, 0.7))
 		draw_string(font, Vector2(0, 34), "NEXT", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Config.C_TEXT_DIM)
 		var groups := Config.wave_preview(wave, Game.mode)

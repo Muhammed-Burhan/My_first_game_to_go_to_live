@@ -33,6 +33,7 @@ const DEFAULT_MODS := {
 	"rate_ballista": 1.0, "splash_oil": 1.0, "burn_oil": 0.0,
 	"burn_naphtha_mult": 1.0, "splash_mangonel": 1.0,
 	"garrison_extra": 0, "tower_hp": 1.0, "tower_taken": 1.0, "repair_cost": 1.0,
+	"build_cost": 1.0,
 	"rock_kill": 1.0, "rock_wave": 1.0, "rock_per_wave": 0,
 	"crit_chance": 0.0, "crit_mult": 2.5,
 	"streak_rock": 0, "salvage": 0.0, "start_tier": 1,
@@ -151,8 +152,13 @@ func count_taken(id: String) -> int:
 ## Three distinct boons the player has not maxed out, weighted by rarity.
 func offer(count: int = 3) -> Array:
 	var pool: Array = []
+	var locked := Meta.locked_boon_ids()
 	for b in CATALOGUE:
 		if count_taken(b["id"]) >= int(b.get("stack", 1)):
+			continue
+		# Boons the player has not levelled into yet stay out of the draft, so
+		# the card pool is visibly deeper at level 9 than it was at level 1.
+		if locked.has(b["id"]):
 			continue
 		pool.append(b)
 	var out: Array = []
@@ -242,6 +248,12 @@ func tower_hp(type: int, tier: int) -> float:
 
 func tower_damage_taken(amount: float) -> float:
 	return amount * maxf(0.05, m("tower_taken"))
+
+
+## Config.tower_cost with the run's modifiers folded in. Level and the build
+## menu price from here, never from Config directly.
+func tower_cost(type: int, tier: int) -> int:
+	return maxi(1, int(round(float(Config.tower_cost(type, tier)) * maxf(0.1, m("build_cost")))))
 
 
 func repair_cost(base: int) -> int:

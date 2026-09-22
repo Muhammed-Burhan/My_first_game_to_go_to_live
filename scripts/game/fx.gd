@@ -230,7 +230,7 @@ class FloatText extends Node2D:
 		var pop := 1.0
 		if style == "crit":
 			pop = 1.0 + 0.5 * exp(-u * 14.0)
-		var font := ThemeDB.fallback_font
+		var font := Fonts.ui(Fonts.W_BLACK)
 		var w := 700.0
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2(pop, pop))
 		var pos := Vector2(-w / 2, 0)

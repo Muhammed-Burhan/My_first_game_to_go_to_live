@@ -11,12 +11,7 @@ const GOLD_BOT := Color("a9762f")
 
 static func make() -> Theme:
 	var theme := Theme.new()
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["Segoe UI", "Roboto", "Noto Sans", "Noto Sans Arabic", "Arial", "sans-serif"])
-	font.font_weight = 700
-	font.allow_system_fallback = true
-	font.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-	theme.default_font = font
+	theme.default_font = Fonts.ui(Fonts.W_BOLD)
 	theme.default_font_size = 40
 
 	# Buttons: night-blue body, gold rim, lighter top edge.
@@ -35,7 +30,8 @@ static func make() -> Theme:
 	theme.set_color("font_disabled_color", "Button", Config.C_TEXT_DIM)
 	theme.set_color("font_outline_color", "Button", Color(0, 0, 0, 0.8))
 	theme.set_constant("outline_size", "Button", 6)
-	theme.set_font_size("font_size", "Button", 40)
+	theme.set_font("font", "Button", Fonts.ui(Fonts.W_BLACK, 1))
+	theme.set_font_size("font_size", "Button", 38)
 
 	# Labels
 	theme.set_color("font_color", "Label", Config.C_TEXT)
@@ -54,6 +50,7 @@ static func make() -> Theme:
 	theme.set_color("font_color", "LineEdit", Config.C_TEXT)
 	theme.set_color("font_placeholder_color", "LineEdit", Config.C_TEXT_DIM)
 	theme.set_color("caret_color", "LineEdit", Config.C_ROCK)
+	theme.set_font("font", "LineEdit", Fonts.ui(Fonts.W_BOLD))
 	theme.set_font_size("font_size", "LineEdit", 48)
 	return theme
 
@@ -69,6 +66,32 @@ static func make_primary(btn: Button) -> void:
 	btn.add_theme_color_override("font_pressed_color", Color("2a1d10"))
 	btn.add_theme_color_override("font_outline_color", Color(1, 1, 1, 0.35))
 	btn.add_theme_constant_override("outline_size", 4)
+
+
+## Square icon buttons. The theme’s panel padding is sized for a wide button
+## with a word in it; on an 84px square it leaves about 24px of usable width,
+## which is what was eating the "AUTO" label down to "AUT".
+static func make_compact(btn: Button, gold: bool = false) -> void:
+	var m := Vector4(6, 6, 6, 6)
+	if gold:
+		btn.add_theme_stylebox_override("normal", Gfx.gradient_box(GOLD_TOP, GOLD_BOT, Color("fff0c0"), 3.0, 22.0, m))
+		btn.add_theme_stylebox_override("hover", Gfx.gradient_box(GOLD_TOP.lightened(0.12), GOLD_BOT.lightened(0.1), Color.WHITE, 3.0, 22.0, m))
+		btn.add_theme_stylebox_override("pressed", Gfx.gradient_box(GOLD_BOT, GOLD_TOP, Color("fff0c0"), 3.0, 22.0, m))
+		btn.add_theme_color_override("font_color", Color("2a1d10"))
+		btn.add_theme_color_override("font_hover_color", Color("2a1d10"))
+		btn.add_theme_color_override("font_pressed_color", Color("2a1d10"))
+		btn.add_theme_color_override("font_outline_color", Color(1, 1, 1, 0.3))
+		btn.add_theme_constant_override("outline_size", 3)
+		return
+	btn.add_theme_stylebox_override("normal", Gfx.gradient_box(Color("1b2c4e"), Color("0c1528"), Config.C_UI_LINE, 3.0, 22.0, m))
+	btn.add_theme_stylebox_override("hover", Gfx.gradient_box(Color("27406e"), Color("142238"), Config.C_SAND_LIGHT, 3.0, 22.0, m))
+	btn.add_theme_stylebox_override("pressed", Gfx.gradient_box(Color("0c1528"), Color("1b2c4e"), Config.C_SAND_LIGHT, 3.0, 22.0, m))
+	btn.add_theme_stylebox_override("disabled", Gfx.gradient_box(Color(0.09, 0.11, 0.16, 0.6), Color(0.05, 0.06, 0.1, 0.6), Color(Config.C_UI_LINE, 0.3), 2.0, 22.0, m))
+	btn.add_theme_color_override("font_color", Config.C_TEXT)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_pressed_color", Config.C_ROCK)
+	btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	btn.add_theme_constant_override("outline_size", 5)
 
 
 ## Red variant, for destructive or "quit" actions.

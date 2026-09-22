@@ -7,6 +7,12 @@ extends Node2D
 ## and it is where the arcade feel lives. It is deliberately heat-limited: a
 ## held finger overheats in about four seconds, so the rhythm is burst, cool,
 ## burst — and it can never simply replace the emplacements.
+##
+## It also runs itself. AUTO picks the attacker nearest the gate and keeps the
+## barrel just below the red, which is what you want while both hands are busy
+## building. It is deliberately the weaker option: slower rate, and it will not
+## push into the heat a human is willing to spend. Convenience, not a free
+## upgrade — taking hold of it by hand is still the higher-damage play.
 
 const DAMAGE := 14.0
 const RATE := 5.5             # shots per second
@@ -16,6 +22,11 @@ const HEAT_PER_SHOT := 0.14
 const COOL_RATE := 0.5        # heat per second shed when not firing
 const OVERHEAT_LOCK := 1.6    # seconds locked out after redlining
 const SPREAD := 0.035
+## Auto is worth roughly two thirds of a held finger, and stops short of the
+## lockout instead of riding it.
+const AUTO_RATE := 0.62
+const AUTO_HEAT_STOP := 0.72
+const AUTO_HEAT_RESUME := 0.34
 
 signal overheated
 
@@ -23,6 +34,8 @@ var level: Level
 var heat: float = 0.0
 var locked: float = 0.0
 var firing: bool = false
+## Fires itself at the attacker nearest the gate when the player is not holding.
+var auto: bool = false
 var aim_point: Vector2 = Vector2(540, 1200)
 
 var _aim: float = PI * 0.5
@@ -30,6 +43,9 @@ var _cooldown: float = 0.0
 var _recoil: float = 0.0
 var _t: float = 0.0
 var _light: PointLight2D
+var _auto_target: Enemy = null
+var _auto_resting: bool = false
+var _auto_scan: float = 0.0
 
 
 func _ready() -> void:
@@ -48,6 +64,20 @@ func aim_at(world: Vector2) -> void:
 
 func set_firing(on: bool) -> void:
 	firing = on
+	if on:
+		Game.note_commander_fired()
+
+
+## Automatic fire counts as firing the repeater: the "quiet wave" contract asks
+## for waves held without it, and letting AUTO shoot for free would be a lie.
+func set_auto(on: bool) -> void:
+	auto = on
+	_auto_target = null
+	_auto_resting = false
+	if not on:
+		return
+	Save.data["commander_auto"] = true
+	Save.save_profile()
 
 
 func _process(delta: float) -> void:
@@ -61,19 +91,63 @@ func _process(delta: float) -> void:
 	if locked > 0.0:
 		locked = maxf(0.0, locked - dt)
 		heat = maxf(0.0, heat - dt * COOL_RATE * 1.4)
+		_auto_target = null
 	elif firing and can_fire():
+		# A hand on the trigger always wins: manual runs at full rate and is
+		# allowed to redline, which is the whole reason to take hold of it.
 		_cooldown -= dt
-		heat = minf(1.0, heat + 0.0)
 		if _cooldown <= 0.0:
 			_shoot()
+	elif auto and can_fire() and _auto_tick(dt):
+		_cooldown -= dt
+		if _cooldown <= 0.0:
+			_shoot(AUTO_RATE)
 	else:
 		heat = maxf(0.0, heat - dt * COOL_RATE)
 	_light.energy = maxf(0.0, _recoil * 1.2)
 	queue_redraw()
 
 
-func _shoot() -> void:
-	_cooldown = 1.0 / (RATE * Boons.m("cmd_rate"))
+## Runs the automatic gunner. Returns true when it wants to pull the trigger
+## this frame. Re-targets a few times a second rather than every frame: a
+## turret that snaps to a new man the instant one dies reads as a twitch.
+func _auto_tick(dt: float) -> bool:
+	heat = maxf(0.0, heat - dt * COOL_RATE)
+	# Hysteresis around the red zone, so it eases off and comes back rather
+	# than stuttering on the threshold.
+	if _auto_resting:
+		if heat > AUTO_HEAT_RESUME:
+			return false
+		_auto_resting = false
+	elif heat >= AUTO_HEAT_STOP:
+		_auto_resting = true
+		return false
+	_auto_scan -= dt
+	if _auto_scan <= 0.0 or _auto_target == null or not is_instance_valid(_auto_target) \
+			or not _auto_target.alive:
+		_auto_scan = 0.22
+		_auto_target = _pick_auto_target()
+	if _auto_target == null:
+		return false
+	# Lead the shot a little: the tracer has travel time and the column moves.
+	aim_point = _auto_target.predict_position(
+		global_position.distance_to(_auto_target.global_position) / 1750.0)
+	return true
+
+
+## The attacker nearest the gate, which is the one about to cost a life.
+func _pick_auto_target() -> Enemy:
+	var best: Enemy = null
+	var best_prog := -1.0
+	for e in level.living_enemies():
+		if e.progress > best_prog:
+			best_prog = e.progress
+			best = e
+	return best
+
+
+func _shoot(rate_scale: float = 1.0) -> void:
+	_cooldown = 1.0 / (RATE * Boons.m("cmd_rate") * rate_scale)
 	_recoil = 1.0
 	heat = minf(1.0, heat + HEAT_PER_SHOT)
 	if heat >= 1.0:

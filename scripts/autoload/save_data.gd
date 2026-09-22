@@ -16,6 +16,13 @@ var data: Dictionary = {
 	"muted": false,
 	"last_name": "",
 	"seen_intro": false,
+	# The progression layer (see meta.gd). These have to be declared here:
+	# load_profile only restores keys that already exist in this dictionary, so
+	# anything Meta adds afterwards would be wiped on every launch.
+	"commander_auto": false,
+	"renown": 0,
+	"commander": "warden",
+	"contracts": {"day": -1, "list": [], "day_stats": {}},
 }
 
 
@@ -39,8 +46,17 @@ func load_profile() -> void:
 			var d: Dictionary = data[group]
 			for k in d.keys():
 				d[k] = int(d[k])
-		for k in ["runs", "wins", "kills"]:
+		for k in ["runs", "wins", "kills", "renown"]:
 			data[k] = int(data[k])
+		# JSON has no integer type, so the contract counters come back as
+		# floats and would print as "12.0 / 200" in the UI.
+		var c: Dictionary = data["contracts"]
+		c["day"] = int(c.get("day", -1))
+		for entry in c.get("list", []):
+			entry["progress"] = int(entry.get("progress", 0))
+		var day_stats: Dictionary = c.get("day_stats", {})
+		for k in day_stats.keys():
+			day_stats[k] = int(day_stats[k])
 
 
 func save_profile() -> void:

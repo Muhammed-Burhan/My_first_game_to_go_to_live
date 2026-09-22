@@ -51,6 +51,8 @@ var _spawn_list: Array = []
 var _spawn_timer: float = 0.0
 var _shake_time: float = 0.0
 var _shake_strength: float = 0.0
+var _shake_dir: Vector2 = Vector2.ZERO
+var _shake_phase: float = 0.0
 var _path_points_cache: PackedVector2Array
 var _wave_scale: Dictionary = {}
 var _current_seed: int = 0
@@ -338,10 +340,8 @@ func start_run(mode: int = -1) -> void:
 	next_wave = 1
 	wave_size = 0
 	_spawn_list.clear()
-	_set_phase("prep")
 	prep_left = Config.PREP_TIME_FIRST
-	for s in slots:
-		s.hint = true
+	_set_phase("prep")
 	Sfx.music("menu")
 
 
@@ -354,6 +354,10 @@ func _set_phase(p: String) -> void:
 	phase = p
 	if commander != null and p != "wave":
 		commander.set_firing(false)
+	# Prep is the only time building matters, so that is the only time the
+	# empty plinths are allowed to draw attention to themselves.
+	for s in slots:
+		s.hint = p == "prep" and s.tower == null
 	phase_changed.emit(p)
 
 
@@ -375,8 +379,6 @@ func _process(delta: float) -> void:
 
 
 func _begin_wave() -> void:
-	for s in slots:
-		s.hint = false
 	Game.set_wave(next_wave)
 	_spawn_list = Config.wave_spawn_list(next_wave, Game.mode)
 	wave_size = _spawn_list.size()
@@ -567,6 +569,10 @@ func _on_enemy_died(e: Enemy) -> void:
 		"crit" if e.elite else "plain")
 	Fx.coin(fx_layer, e.global_position, 1 if reward < 40 else 3)
 	var heavy: bool = e.type == Config.EnemyType.BOSS or e.type == Config.EnemyType.CART 		or e.type == Config.EnemyType.CATAPULT
+	if heavy:
+		Meta.track("kills_heavy")
+	if e.burning():
+		Meta.track("kills_fire")
 	Fx.burst(fx_layer, e.global_position, Config.C_THREAT, 14 if not heavy else 50, 220.0)
 	if e.elite:
 		Fx.shockwave(fx_layer, e.global_position, 110.0, Config.C_ELITE, 0.4)
@@ -588,7 +594,7 @@ func _on_enemy_reached_gate(e: Enemy) -> void:
 	var cost: int = e.stats["lives"]
 	gate.hit()
 	Sfx.play("gate_hit")
-	shake(20.0 if cost == 1 else 34.0, 0.55)
+	shake(20.0 if cost == 1 else 34.0, 0.55, (GATE_POS - e.global_position).normalized())
 	post.flash(Config.C_THREAT, 0.4 if cost == 1 else 0.7)
 	Fx.hit_stop(self, 0.07, 0.12)
 	Fx.float_text(fx_layer, GATE_POS + Vector2(0, 90), "BREACH" if cost >= 99 else "-%d" % cost, Config.C_THREAT, 58, "crit")
@@ -600,7 +606,7 @@ func _on_enemy_reached_gate(e: Enemy) -> void:
 func place_tower(slot: Slot, type: int) -> bool:
 	if slot.tower != null:
 		return false
-	var cost := Config.tower_cost(type, 1)
+	var cost := Boons.tower_cost(type, 1)
 	if not Game.spend(cost):
 		Sfx.play("deny")
 		return false
@@ -616,6 +622,9 @@ func place_tower(slot: Slot, type: int) -> bool:
 	for i in range(free_tiers):
 		if t.tier < Config.MAX_TIER:
 			t.upgrade()
+	Meta.track("builds")
+	if type == Config.TowerType.MANGONEL:
+		Meta.track("builds_mangonel")
 	Sfx.play("build")
 	Fx.burst(fx_layer, slot.position, Config.C_SAND_LIGHT, 16, 180.0)
 	Fx.ring(fx_layer, slot.position, 90.0, Config.C_SAND_LIGHT)
@@ -626,7 +635,7 @@ func place_tower(slot: Slot, type: int) -> bool:
 func upgrade_tower(t: Tower) -> bool:
 	if t.tier >= Config.MAX_TIER:
 		return false
-	var cost := Config.tower_cost(t.type, t.tier + 1)
+	var cost := Boons.tower_cost(t.type, t.tier + 1)
 	if not Game.spend(cost):
 		Sfx.play("deny")
 		return false
@@ -718,9 +727,15 @@ func _slot_at(world: Vector2) -> Slot:
 
 # ------------------------------------------------------------------ camera shake
 
-func shake(strength: float, duration: float = 0.35) -> void:
+## `dir`, when given, is the direction the force came from: the screen kicks
+## along it and rings out, instead of jittering at random. A random shake reads
+## as noise; a directed one reads as a blow landing somewhere.
+func shake(strength: float, duration: float = 0.35, dir: Vector2 = Vector2.ZERO) -> void:
 	if Game.sim_mode:
 		return
+	if strength >= _shake_strength:
+		_shake_dir = dir.normalized() if dir.length_squared() > 0.001 else Vector2.ZERO
+		_shake_phase = 0.0
 	_shake_strength = maxf(_shake_strength, strength)
 	_shake_time = maxf(_shake_time, duration)
 
@@ -731,10 +746,20 @@ func _process_shake(delta: float) -> void:
 			position = Vector2.ZERO
 		return
 	_shake_time -= delta
+	_shake_phase += delta
+	# Exponential decay rather than linear: the first frame carries the punch
+	# and it settles fast, which is what stops a shake feeling like a wobble.
 	var k := clampf(_shake_time / 0.35, 0.0, 1.0)
-	position = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake_strength * k
+	k = k * k
+	var jitter := Vector2(randf_range(-1, 1), randf_range(-1, 1))
+	if _shake_dir == Vector2.ZERO:
+		position = jitter * _shake_strength * k
+	else:
+		var ring := sin(_shake_phase * 46.0)
+		position = (_shake_dir * ring * 1.15 + jitter * 0.35) * _shake_strength * k
 	if _shake_time <= 0.0:
 		_shake_strength = 0.0
+		_shake_dir = Vector2.ZERO
 		position = Vector2.ZERO
 
 

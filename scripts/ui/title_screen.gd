@@ -5,8 +5,11 @@ extends Control
 ## In booth mode it doubles as the attract loop, alternating daily / all-time.
 
 signal start_requested(mode: int)
+signal garrison_requested(tab: int)
 
 var _board: LeaderboardPanel
+var _strip: TopStrip
+var _garrison_row: GarrisonRow
 var _cards: Array[Control] = []
 var _banner: Banner
 var _daily: DailyCard
@@ -30,10 +33,18 @@ func _ready() -> void:
 	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_banner)
 
+	# Level and renown ride at the very top. It is the first thing on the
+	# screen because it is the thing that is different from last time.
+	_strip = TopStrip.new()
+	_strip.position = Vector2(55, 40)
+	_strip.size = Vector2(880, 104)
+	_strip.tapped.connect(func(): garrison_requested.emit(2))
+	add_child(_strip)
+
 	# The Daily is the hero: it is the one that is the same for everyone today.
 	_daily = DailyCard.new()
-	_daily.position = Vector2(55, 720)
-	_daily.size = Vector2(970, 330)
+	_daily.position = Vector2(55, 630)
+	_daily.size = Vector2(970, 300)
 	_daily.chosen.connect(_on_card)
 	add_child(_daily)
 	_cards.append(_daily)
@@ -42,20 +53,27 @@ func _ready() -> void:
 	for i in range(side.size()):
 		var card := ModeCard.new()
 		card.mode = side[i]
-		card.position = Vector2(55 + i * 495, 1080)
+		card.position = Vector2(55 + i * 495, 960)
 		card.size = Vector2(475, 300)
 		card.chosen.connect(_on_card)
 		add_child(card)
 		_cards.append(card)
 
+	# Who you are taking in, and what today is asking for.
+	_garrison_row = GarrisonRow.new()
+	_garrison_row.position = Vector2(55, 1288)
+	_garrison_row.size = Vector2(970, 146)
+	_garrison_row.tapped.connect(func(tab: int): garrison_requested.emit(tab))
+	add_child(_garrison_row)
+
 	_board = LeaderboardPanel.new()
-	_board.position = Vector2(55, 1412)
-	_board.size = Vector2(970, 400)
+	_board.position = Vector2(55, 1462)
+	_board.size = Vector2(970, 350)
 	add_child(_board)
 
 	_mute_btn = Button.new()
-	_mute_btn.position = Vector2(920, 60)
-	_mute_btn.size = Vector2(100, 100)
+	_mute_btn.position = Vector2(948, 168)
+	_mute_btn.size = Vector2(92, 92)
 	_mute_btn.add_theme_font_size_override("font_size", 44)
 	_mute_btn.pressed.connect(_on_mute)
 	add_child(_mute_btn)
@@ -79,6 +97,8 @@ func show_title() -> void:
 	tw.tween_property(self, "modulate:a", 1.0, 0.35)
 	_board.highlight_id = ""
 	_board.refresh()
+	_strip.queue_redraw()
+	_garrison_row.queue_redraw()
 	Leaderboard.refresh_remote()
 	for i in range(_cards.size()):
 		var c := _cards[i]
@@ -102,6 +122,12 @@ func _process(delta: float) -> void:
 
 
 func _on_card(mode: int) -> void:
+	var mode_id := str(Config.MODES[mode]["id"])
+	if not Meta.is_unlocked_mode(mode_id):
+		# Show them what it is and what it costs rather than just buzzing.
+		Sfx.play("deny")
+		garrison_requested.emit(2)
+		return
 	Sfx.play("click")
 	start_requested.emit(mode)
 
@@ -126,24 +152,7 @@ class Banner extends Control:
 		queue_redraw()
 
 	func _draw() -> void:
-		var font := ThemeDB.fallback_font
-		var y := 360.0
-		for line in [["CITADEL", y], ["DEFENSE", y + 132]]:
-			var text: String = line[0]
-			var ly: float = line[1]
-			draw_string_outline(font, Vector2(0, ly + 8), text, HORIZONTAL_ALIGNMENT_CENTER, 1080, 142, 24, Color("1a1108"))
-			draw_string(font, Vector2(0, ly), text, HORIZONTAL_ALIGNMENT_CENTER, 1080, 142, Config.C_SAND_LIGHT)
-		var sweep := fmod(_t * 0.35, 2.6) / 2.6
-		var sx := lerpf(-260.0, 1340.0, sweep)
-		for i in range(6):
-			var k := float(i) / 5.0
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(sx + k * 110 - 22, y - 124), Vector2(sx + k * 110 + 22, y - 124),
-				Vector2(sx + k * 110 - 48, y + 162), Vector2(sx + k * 110 - 92, y + 162),
-			]), Color(1, 1, 1, 0.045 * (1.0 - absf(k - 0.5) * 2.0)))
-		var sub := "ERBIL  ·  1258  ·  HOLD THE GATE"
-		draw_string_outline(font, Vector2(0, y + 212), sub, HORIZONTAL_ALIGNMENT_CENTER, 1080, 38, 9, Color(0, 0, 0, 0.85))
-		draw_string(font, Vector2(0, y + 212), sub, HORIZONTAL_ALIGNMENT_CENTER, 1080, 38, Config.C_ROCK)
+		Wordmark.draw(self, 372.0, 1080.0, 1.0, _t)
 
 
 ## Shared press behaviour for every card on this screen.
@@ -167,6 +176,13 @@ class CardBase extends Control:
 
 	func refresh() -> void:
 		queue_redraw()
+
+	## Shared with the garrison rows: same lock, same meaning, everywhere.
+	static func draw_padlock(ci: CanvasItem, c: Vector2, s: float = 1.0) -> void:
+		var col := Color(0.62, 0.66, 0.74, 0.85)
+		ci.draw_arc(c + Vector2(0, -16 * s), 17 * s, PI, TAU, 20, col, 7.0 * s)
+		ci.draw_rect(Rect2(c.x - 25 * s, c.y - 8 * s, 50 * s, 38 * s), col)
+		ci.draw_circle(c + Vector2(0, 8 * s), 6 * s, Color(0.1, 0.11, 0.15, 0.95))
 
 	func _process(delta: float) -> void:
 		_t += delta
@@ -217,8 +233,22 @@ class DailyCard extends CardBase:
 
 	func _draw() -> void:
 		var pulse := 0.5 + 0.5 * sin(_t * 1.9)
-		Gfx.draw_glow(self, size / 2.0, size.x * 0.45, Config.C_ROCK, 0.24 + 0.12 * pulse, 5)
+		var open := Meta.is_unlocked_mode("daily")
+		if open:
+			Gfx.draw_glow(self, size / 2.0, size.x * 0.45, Config.C_ROCK, 0.24 + 0.12 * pulse, 5)
 		draw_style_box(_box, Rect2(Vector2.ZERO, size))
+		if not open:
+			draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.03, 0.06, 0.7))
+			CardBase.draw_padlock(self, Vector2(140, size.y * 0.5), 1.4)
+			Gfx.draw_text(self, Vector2(250, 118), "DAILY SIEGE", 60, Color(Config.C_TEXT_DIM, 0.75),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 9)
+			Gfx.draw_text(self, Vector2(252, 168), "Opens at level %d  ·  %d renown away" % [
+				Meta.mode_unlock_level("daily"),
+				maxi(Meta.renown_for_level(Meta.mode_unlock_level("daily")) - Meta.renown(), 0)],
+				30, Config.C_ROCK, HORIZONTAL_ALIGNMENT_LEFT, -1, 6)
+			Gfx.draw_text(self, Vector2(252, 216), "One seed a day. The same siege for everyone.",
+				26, Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_LEFT, -1, 5, Fonts.ui(Fonts.W_MED))
+			return
 		# Sun-and-mound emblem on the left
 		var c := Vector2(140, size.y * 0.5)
 		draw_circle(c, 78, Color(Config.C_ROCK, 0.12))
@@ -273,8 +303,10 @@ class ModeCard extends CardBase:
 		var m: Dictionary = Config.MODES[mode]
 		var free := mode == Config.Mode.FREE
 		var rim: Color = Config.C_ELITE if free else Config.C_UI_LINE
+		var open := Meta.is_unlocked_mode(str(m["id"]))
 		var pulse := 0.5 + 0.5 * sin(_t * 2.0 + (1.6 if free else 0.0))
-		Gfx.draw_glow(self, size / 2.0, size.x * 0.6, rim, 0.22 + 0.10 * pulse, 4)
+		if open:
+			Gfx.draw_glow(self, size / 2.0, size.x * 0.6, rim, 0.22 + 0.10 * pulse, 4)
 		draw_style_box(_box, Rect2(Vector2.ZERO, size))
 		var art := Rect2(22, 20, size.x - 44, 130)
 		draw_style_box(_art_box, art)
@@ -283,6 +315,19 @@ class ModeCard extends CardBase:
 			_draw_dice(c)
 		else:
 			_draw_gate(c)
+		if not open:
+			# Dim the whole card and say plainly what opens it. A locked thing
+			# the player can see is a goal; a hidden one is nothing at all.
+			draw_rect(Rect2(Vector2.ZERO, size), Color(0.02, 0.03, 0.06, 0.72))
+			CardBase.draw_padlock(self, Vector2(size.x * 0.5, 82), 1.15)
+			Gfx.draw_text(self, Vector2(0, 194), str(m["name"]), 40, Color(Config.C_TEXT_DIM, 0.7),
+				HORIZONTAL_ALIGNMENT_CENTER, size.x)
+			Gfx.draw_text(self, Vector2(0, 236), "LEVEL %d" % Meta.mode_unlock_level(str(m["id"])),
+				32, Config.C_ROCK, HORIZONTAL_ALIGNMENT_CENTER, size.x, 6)
+			Gfx.draw_text(self, Vector2(0, 274), "%d renown away" % maxi(
+				Meta.renown_for_level(Meta.mode_unlock_level(str(m["id"]))) - Meta.renown(), 0),
+				24, Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER, size.x, 5, Fonts.ui(Fonts.W_MED))
+			return
 		Gfx.draw_text(self, Vector2(0, 194), str(m["name"]), 40, Config.C_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		Gfx.draw_text(self, Vector2(0, 230), str(m["sub"]), 26, rim, HORIZONTAL_ALIGNMENT_CENTER, size.x, 5)
 		var best_text := "BEST  %d" % _best if _best > 0 else "NO RUN YET"
@@ -310,3 +355,80 @@ class ModeCard extends CardBase:
 		for p in [Vector2(-17, -17), Vector2(17, -17), Vector2(0, 0), Vector2(-17, 17), Vector2(17, 17)]:
 			draw_circle(p, 7, Color("1a0f2a"))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Level and renown, across the top of the title. Tapping it opens the garrison
+## on the unlock track, because "what is this bar for" is the question it asks.
+class TopStrip extends Control:
+	signal tapped
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		Meta.renown_changed.connect(func(_t): queue_redraw())
+
+	func _draw() -> void:
+		RenownBar.draw_into(self, Rect2(0, 0, size.x, 96))
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			accept_event()
+			Sfx.play("click")
+			tapped.emit()
+
+
+## Two chips: the commander leading the next run, and how today's contracts are
+## going. Both open the garrison, on the tab they are about.
+class GarrisonRow extends Control:
+	signal tapped(tab: int)
+	var _t := 0.0
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		set_process(true)
+
+	func _process(delta: float) -> void:
+		_t += delta
+		queue_redraw()
+
+	func _cmd_rect() -> Rect2:
+		return Rect2(0, 0, size.x * 0.58 - 12.0, size.y)
+
+	func _con_rect() -> Rect2:
+		return Rect2(size.x * 0.58 + 12.0, 0, size.x * 0.42 - 12.0, size.y)
+
+	func _draw() -> void:
+		var cmd := Meta.commander_data()
+		var col: Color = cmd["color"]
+		var r := _cmd_rect()
+		Gfx.draw_panel(self, r, Color(0.055, 0.08, 0.15, 0.94), Color(col, 0.55), 22.0, 2.0)
+		var c := r.position + Vector2(74, r.size.y * 0.5)
+		draw_circle(c, 46, Color(col, 0.14))
+		draw_arc(c, 46, 0, TAU, 32, Color(col, 0.5), 2.5)
+		DraftScreen.draw_boon_art(self, c, str(cmd["art"]), 0.33, _t)
+		Gfx.draw_text(self, Vector2(r.position.x + 136, r.position.y + 58), "COMMANDER", 22,
+			Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_LEFT, -1, 5, Fonts.ui(Fonts.W_BLACK, 4))
+		Gfx.draw_text(self, Vector2(r.position.x + 136, r.position.y + 100), str(cmd["title"]), 34,
+			Config.C_TEXT, HORIZONTAL_ALIGNMENT_LEFT, -1, 6)
+
+		# Contracts: the count is the hook, so it is the big number.
+		var done := Meta.contracts_done()
+		var total: int = Meta.contracts().size()
+		var all_done := total > 0 and done >= total
+		var accent: Color = Config.C_GOOD if all_done else Config.C_ROCK
+		var r2 := _con_rect()
+		Gfx.draw_panel(self, r2, Color(0.055, 0.08, 0.15, 0.94), Color(accent, 0.55), 22.0, 2.0)
+		Gfx.draw_text(self, Vector2(r2.position.x, r2.position.y + 50), "CONTRACTS", 22,
+			Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER, r2.size.x, 5, Fonts.ui(Fonts.W_BLACK, 4))
+		Gfx.draw_text(self, Vector2(r2.position.x, r2.position.y + 104), "%d / %d" % [done, total], 44,
+			accent, HORIZONTAL_ALIGNMENT_CENTER, r2.size.x, 7)
+		if not all_done:
+			# A soft pulse on the card's own rim while there is still something
+			# to claim. Anything radial here spills outside the chip.
+			var a := 0.30 + 0.22 * sin(_t * 2.4)
+			Gfx.draw_panel(self, r2.grow(-3.0), Color(0, 0, 0, 0), Color(accent, a), 20.0, 3.0)
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			accept_event()
+			Sfx.play("click")
+			tapped.emit(1 if _con_rect().has_point(event.position) else 0)

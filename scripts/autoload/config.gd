@@ -112,17 +112,50 @@ const C_STAR := Color("f2e6c4")
 const C_MOON := Color("f5ead0")
 const C_MOUNTAIN_FAR := Color("1b2647")
 const C_MOUNTAIN_NEAR := Color("141c35")
-const C_PLAIN := Color("2d2c1e")
-const C_PLAIN_LIGHT := Color("3d3a27")
+const C_PLAIN := Color("221f16")
+const C_PLAIN_LIGHT := Color("312d1f")
 const C_SAND := Color("c9a063")
 const C_SAND_DARK := Color("9a7442")
 const C_SAND_DEEP := Color("6e5230")
 const C_SAND_LIGHT := Color("e3c48a")
+
+## Terrain has its own ramp, separate from the sandstone the buildings are cut
+## from. The mound is a night landscape: low chroma, dark, and it gets out of
+## the way. Everything that matters — the road, the emplacements, the column
+## climbing it — is lighter or more saturated than this, which is the whole
+## reason a glance at the screen lands on the fight instead of on the dirt.
+const C_GROUND_LOW := Color("241d15")     # foot of the mound, furthest from the gate
+const C_GROUND_HIGH := Color("463726")    # the top terrace, nearest the torches
+const C_GROUND_RIM := Color("6d563a")     # lit lip of a terrace
+const C_GROUND_SCRUB := Color("2f3325")   # the bushes clinging to the terraces
+## An empty plinth is furniture. It sits a hair above the ground it stands on
+## and no more, until the build sheet is open and it has something to offer.
+const C_PLINTH := Color("3b2f21")
+const C_PLINTH_TOP := Color("574430")
 const C_WALL := Color("d7b57a")
 const C_WALL_SHADOW := Color("a17b48")
 const C_WINDOW := Color("2a1d10")
-const C_PATH := Color("8b6a3e")
-const C_PATH_EDGE := Color("5a4226")
+const C_PATH := Color("9d7a47")
+const C_PATH_EDGE := Color("4a3520")
+## The column. Warm road, cold army: the attackers are charcoal and steel with
+## hot crimson cloth, so an attacker separates from the ground it walks on by
+## temperature as well as by value. That is what lets a unit read at 22px on a
+## phone without a per-limb outline pass.
+## These were chosen when separation had to come from value alone, so they sat
+## just above black. Every mass now carries a heavy dark outline, which does
+## that job far better — so the cloth itself can be as saturated as the toy-
+## soldier look actually wants. Dark units with a dark outline are just a blob.
+const C_FOE_DARK := Color("2b2536")       # boots, fur hats: dark, but not the ink
+const C_FOE_BODY := Color("52496a")       # padded coat / lamellar
+const C_FOE_BODY_HI := Color("6f6490")
+const C_FOE_CLOTH := Color("e03a35")      # sashes, banners, horse tack
+const C_FOE_CLOTH_DARK := Color("922226")
+const C_FOE_SKIN := Color("efb98a")
+const C_FOE_RIM := Color("a7bce0")        # moonlight down the leading edge
+const C_FOE_HORSE := Color("463d54")
+const C_FOE_TIMBER := Color("5d3f24")     # siege engines: still wood, but night wood
+const C_FOE_TIMBER_DARK := Color("32200f")
+
 const C_THREAT := Color("d63a2f")
 const C_THREAT_DARK := Color("8e1f18")
 const C_ROCK := Color("f2c14e")

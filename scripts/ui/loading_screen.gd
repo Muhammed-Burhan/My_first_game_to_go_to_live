@@ -260,27 +260,7 @@ class Art extends Control:
 		draw_rect(Rect2(-12, -298, 24, 11), Config.C_ROCK)
 
 	func _draw_wordmark() -> void:
-		var font := ThemeDB.fallback_font
-		var y := 880.0
-		for line in [["CITADEL", 128, y], ["DEFENSE", 128, y + 118]]:
-			var text: String = line[0]
-			var fs: int = line[1]
-			var ly: float = line[2]
-			draw_string_outline(font, Vector2(0, ly + 6), text, HORIZONTAL_ALIGNMENT_CENTER, 1080, fs, 22, Color(0, 0, 0, 0.8))
-			draw_string(font, Vector2(0, ly), text, HORIZONTAL_ALIGNMENT_CENTER, 1080, fs, Config.C_SAND_LIGHT)
-		# Shimmer: a bright band sweeping left to right across the wordmark.
-		var sweep := fmod(_t * 0.45, 2.2) / 2.2
-		var sx := lerpf(-220.0, 1300.0, sweep)
-		for i in range(7):
-			var k := float(i) / 6.0
-			var w := 26.0
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(sx + k * 120 - w, y - 100), Vector2(sx + k * 120 + w, y - 100),
-				Vector2(sx + k * 120 + w - 70, y + 150), Vector2(sx + k * 120 - w - 70, y + 150),
-			]), Color(1, 1, 1, 0.05 * (1.0 - absf(k - 0.5) * 2.0)))
-		var sub := "ERBIL  ·  1258  ·  HOLD THE GATE"
-		draw_string_outline(font, Vector2(0, y + 190), sub, HORIZONTAL_ALIGNMENT_CENTER, 1080, 38, 8, Color(0, 0, 0, 0.8))
-		draw_string(font, Vector2(0, y + 190), sub, HORIZONTAL_ALIGNMENT_CENTER, 1080, 38, Config.C_ROCK)
+		Wordmark.draw(self, 880.0, 1080.0, 1.0, _t)
 
 	## A column of tiny attackers crossing the bottom of the screen.
 	func _draw_marchers() -> void:

@@ -6,6 +6,10 @@ extends Node
 
 var main: Node
 var dir: String = "user://shots"
+## The tour plays a run to completion, which pays renown and can complete
+## contracts. That would quietly rewrite the developer's own profile, so the
+## progression fields are snapshotted here and put back before it quits.
+var _profile_backup: Dictionary = {}
 
 
 func _ready() -> void:
@@ -13,7 +17,32 @@ func _ready() -> void:
 		if a.begins_with("--shot="):
 			dir = a.substr(7)
 	DirAccess.make_dir_recursive_absolute(dir)
+	_backup_profile()
 	_run()
+
+
+func _backup_profile() -> void:
+	for k in ["renown", "commander", "contracts", "commander_auto"]:
+		_profile_backup[k] = Save.data[k].duplicate(true) if Save.data[k] is Dictionary else Save.data[k]
+	# Show the garrison mid-progression rather than empty: locked and unlocked
+	# rows side by side is the thing worth looking at. Pass --fresh to shoot the
+	# tour as a first-time player instead, which is the state that decides
+	# whether anyone gets as far as a second run.
+	if "--fresh" in OS.get_cmdline_user_args():
+		Save.data["renown"] = 0
+		Meta.commander = "warden"
+		Save.data["commander"] = "warden"
+		Save.data["contracts"] = {"day": -1, "list": [], "day_stats": {}}
+		return
+	Save.data["renown"] = Meta.renown_for_level(6) + 60
+	Meta.set_commander("mason")
+
+
+func _restore_profile() -> void:
+	for k in _profile_backup.keys():
+		Save.data[k] = _profile_backup[k]
+	Meta.commander = str(Save.data.get("commander", "warden"))
+	Save.save_profile()
 
 
 func _click(pos: Vector2) -> void:
@@ -24,6 +53,85 @@ func _click(pos: Vector2) -> void:
 		ev.position = pos
 		ev.global_position = pos
 		get_viewport().push_input(ev, true)
+
+
+## Average frame rate over a window. Engine.get_frames_per_second() is a
+## single-frame sample and swings by fifteen frames between runs, which is
+## enough noise to hide or invent a real regression.
+func _fps_over(seconds: float) -> float:
+	# Wall clock, not get_process_delta_time(): this node does not run
+	# _process, so its delta is zero and the average came out as zero too.
+	var frames := 0
+	var t0 := Time.get_ticks_msec()
+	var want := int(seconds * 1000.0)
+	while Time.get_ticks_msec() - t0 < want:
+		await get_tree().process_frame
+		frames += 1
+	var secs := float(Time.get_ticks_msec() - t0) / 1000.0
+	# Draw calls alongside the rate: it is the difference between "the art is
+	# too heavy" and "something else is eating the frame", and guessing wrong
+	# costs a day.
+	print("  draw_calls %d  items %d  lights?%d" % [
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)])
+	return float(frames) / maxf(secs, 0.001)
+
+
+## --hide=bg,atmos,post,units,towers,road strips layers out before the frame
+## rate is measured. Guessing which layer costs the frame is how you spend a
+## day optimising the wrong thing.
+func _apply_hide(level: Node) -> void:
+	var want := ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--hide="):
+			want = a.substr(7)
+	if want == "":
+		return
+	var parts := want.split(",")
+	for name in parts:
+		match name:
+			"bg":
+				level.background.visible = false
+			"post":
+				level.post.visible = false
+			"atmos":
+				for c in level.get_children():
+					if c is Atmosphere:
+						c.visible = false
+			"road":
+				for c in level.get_children():
+					if c is Line2D or c.get_class() == "Node2D":
+						if not (c is Atmosphere) and c != level.fx_layer:
+							c.visible = false
+			"stones":
+				for c in level.get_children():
+					if c.get_script() != null and str(c.get_script().resource_path).ends_with("level.gd"):
+						pass
+				for c in level.get_children():
+					if c.get_class() == "Node2D" and c.get_script() == null:
+						c.visible = false
+			"units":
+				for e in level.enemies.get_children():
+					e.visible = false
+			"towers":
+				for t in level.towers():
+					t.visible = false
+			"slots":
+				for sl in level.slots:
+					sl.visible = false
+			"lights":
+				_kill_lights(level)
+	print("HIDDEN %s" % want)
+
+
+## Every PointLight2D in the tree. Canvas lights re-render whatever they touch,
+## so they cost far more than their draw-call count suggests.
+func _kill_lights(n: Node) -> void:
+	if n is PointLight2D:
+		n.visible = false
+	for c in n.get_children():
+		_kill_lights(c)
 
 
 func _snap(shot_name: String) -> void:
@@ -85,10 +193,31 @@ func _run() -> void:
 	level.spawn_enemy(Config.EnemyType.RAIDER, length * 0.62)
 	level.spawn_enemy(Config.EnemyType.BOSS, length * 0.08)
 	await get_tree().create_timer(2.2).timeout
+	_apply_hide(level)
 	await _snap("03_battle.png")
-	print("FPS_BATTLE %d" % int(Engine.get_frames_per_second()))
+	print("FPS_BATTLE %.1f" % await _fps_over(1.5))
 	await get_tree().create_timer(0.8).timeout
 	await _snap("04_battle_b.png")
+
+	# AUTO has to pull the trigger with no finger on the screen, and the crews
+	# have to be facing what they are shooting at. Both are easy to break and
+	# invisible in a still, so they are checked rather than eyeballed.
+	var aimed := 0
+	for s2 in level.slots:
+		if s2.tower != null and s2.tower._target != null:
+			aimed += 1
+	print("CREW_AIMED %d towers have a target" % aimed)
+	level.commander.set_auto(true)
+	var heat0: float = level.commander.heat
+	await get_tree().create_timer(1.4).timeout
+	print("AUTO_FIRE %s" % ("ok" if level.commander.heat > heat0 else "FAIL"))
+	await _snap("19_auto_fire.png")
+	# And it must stop short of the lockout rather than riding into it.
+	await get_tree().create_timer(4.0).timeout
+	print("AUTO_NO_LOCKOUT %s (heat %.2f)" % [
+		"ok" if level.commander.locked <= 0.0 else "FAIL", level.commander.heat])
+	level.commander.set_auto(false)
+	await get_tree().create_timer(0.3).timeout
 
 	main.menu.open_tower(by_y[2].tower)
 	await get_tree().create_timer(0.35).timeout
@@ -124,7 +253,10 @@ func _run() -> void:
 	Game.rock_earned = 640
 	Game.lives = 1
 	Game.lose_lives(1)
-	await get_tree().create_timer(3.0).timeout
+	# Long enough for the renown bar to finish counting and the unlock banner
+	# to land: that frame is the whole argument for a second run, so the tour
+	# has to actually show it.
+	await get_tree().create_timer(4.6).timeout
 	await _snap("10_score.png")
 	main.score._name_edit.text = "Hawre"
 	main.score._on_submit()
@@ -141,6 +273,19 @@ func _run() -> void:
 	main._show_title()
 	await get_tree().create_timer(0.5).timeout
 	await _snap("13_title_modes.png")
+
+	# The progression screens.
+	main.garrison.open(0)
+	await get_tree().create_timer(0.45).timeout
+	await _snap("14_garrison_commanders.png")
+	main.garrison.open(1)
+	await get_tree().create_timer(0.35).timeout
+	await _snap("15_garrison_contracts.png")
+	main.garrison.open(2)
+	await get_tree().create_timer(0.35).timeout
+	await _snap("16_garrison_unlocks.png")
+	main.garrison.close()
+	await get_tree().create_timer(0.35).timeout
 	main._start_game(Config.Mode.FREE)
 	Game.add_rock(4000, false)
 	for i in range(6):
@@ -157,6 +302,7 @@ func _run() -> void:
 	level.spawn_enemy(Config.EnemyType.SHIELDMAN, length * 0.5)
 	level.spawn_enemy(Config.EnemyType.CART, length * 0.34)
 	await get_tree().create_timer(1.6).timeout
-	await _snap("14_endless.png")
-	print("FPS_ENDLESS %d" % int(Engine.get_frames_per_second()))
+	await _snap("17_endless.png")
+	print("FPS_ENDLESS %.1f" % await _fps_over(1.5))
+	_restore_profile()
 	get_tree().quit()

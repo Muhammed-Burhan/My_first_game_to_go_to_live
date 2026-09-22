@@ -15,12 +15,20 @@ var score: ScoreScreen
 var pause_menu: PauseMenu
 var draft: DraftScreen
 var share: ShareCard
+var garrison: Garrison
 var loading: LoadingScreen
 var loaded: bool = false
 
 
 func _ready() -> void:
-	randomize()
+	# A --sim run pins every random source it can so two balance runs differ as
+	# little as possible. It still will not match to the wave: the game steps
+	# on _process(delta) and a headless frame is not a fixed length, so a run
+	# is a sample, not a fingerprint. Take the sim as a distribution.
+	if Game.sim_mode:
+		seed(Game.sim_boon_seed)
+	else:
+		randomize()
 	var theme := UiTheme.make()
 	get_tree().root.theme = theme
 
@@ -63,6 +71,10 @@ func _ready() -> void:
 	share.theme = theme
 	ui.add_child(share)
 
+	garrison = Garrison.new()
+	garrison.theme = theme
+	ui.add_child(garrison)
+
 	level.slot_tapped.connect(_on_slot_tapped)
 	level.tower_tapped.connect(_on_tower_tapped)
 	level.empty_tapped.connect(func(): menu.close())
@@ -71,6 +83,10 @@ func _ready() -> void:
 	menu.sell_chosen.connect(func(t): level.sell_tower(t))
 	menu.repair_chosen.connect(func(t): level.repair_tower(t))
 	title.start_requested.connect(_start_game)
+	title.garrison_requested.connect(func(tab: int):
+		title.visible = false
+		garrison.open(tab))
+	garrison.closed.connect(func(): title.show_title())
 	score.play_again.connect(func(): _start_game(Game.mode))
 	score.back_to_title.connect(_show_title)
 	score.share_requested.connect(func(): share.show_card(Game.last_result))
@@ -89,6 +105,23 @@ func _ready() -> void:
 		loaded = true
 		_start_game(Game.mode)
 		return
+
+	# Progression self-test: needs the real autoloads, so it runs inside the
+	# game the way --sim and --shot do rather than as a detached -s script.
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--units="):
+			# Sits in the same canvas as the battlefield (a CanvasLayer does not
+			# share the stretch transform, which left the mound showing at the
+			# edges), with the level hidden underneath it.
+			level.visible = false
+			ui.visible = false
+			var sheet := UnitSheet.new()
+			add_child(sheet)
+			return
+		if a == "--metatest":
+			var mt := MetaTest.new()
+			add_child(mt)
+			return
 
 	_start_loading()
 	for a in OS.get_cmdline_user_args():
@@ -115,6 +148,7 @@ func _start_loading() -> void:
 
 func _show_title() -> void:
 	_close_pause()
+	garrison.visible = false
 	share.close()
 	menu.close()
 	hud.visible = false
@@ -124,6 +158,11 @@ func _show_title() -> void:
 
 
 func _start_game(mode: int = Config.Mode.CAMPAIGN) -> void:
+	# A launch flag or a shared ?game=daily link can name a mode this profile
+	# has not opened yet. Fall back rather than dropping them into something
+	# the menu says is locked.
+	if not Meta.is_unlocked_mode(str(Config.MODES[mode]["id"])):
+		mode = Config.Mode.CAMPAIGN
 	_close_pause()
 	share.close()
 	menu.close()

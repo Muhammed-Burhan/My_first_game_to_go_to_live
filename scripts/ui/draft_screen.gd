@@ -28,7 +28,8 @@ func _ready() -> void:
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(dim)
 
-	_title = _label("CHOOSE A BOON", 78, 300, Config.C_ROCK)
+	_title = _label("CHOOSE A BOON", 72, 300, Config.C_ROCK)
+	_title.add_theme_font_override("font", Fonts.display(5))
 	_sub = _label("", 34, 400, Config.C_TEXT_DIM)
 
 	_taken_strip = TakenStrip.new()
@@ -178,7 +179,7 @@ class BoonCard extends Control:
 		Gfx.draw_text(self, Vector2(0, 408), str(boon["name"]), 42, Config.C_TEXT,
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 8)
 		# Body text, wrapped by hand so it sits where we want it
-		var font := ThemeDB.fallback_font
+		var font := Fonts.ui(Fonts.W_MED)
 		var words := str(boon["text"]).split(" ")
 		var line := ""
 		var y := 470.0

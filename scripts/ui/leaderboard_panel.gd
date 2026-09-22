@@ -44,19 +44,24 @@ func _gui_input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	draw_style_box(_box, Rect2(Vector2.ZERO, size))
-	var font := ThemeDB.fallback_font
+	var font := Fonts.ui(Fonts.W_BOLD)
 	var title := "TODAY'S DEFENDERS" if board == "daily" else "ALL-TIME DEFENDERS"
 	Gfx.draw_text(self, Vector2(0, 58), title, 38, Config.C_ROCK, HORIZONTAL_ALIGNMENT_CENTER, size.x, 6)
 	Gfx.draw_text(self, Vector2(0, 92), "tap to switch", 22, Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER, size.x, 4)
 	draw_line(Vector2(40, 110), Vector2(size.x - 40, 110), Color(Config.C_UI_LINE, 0.45), 2.0)
 	var y := 158.0
-	var row_h := (size.y - 180.0) / float(Leaderboard.TOP_N)
-	var fs := int(clampf(row_h * 0.6, 22.0, 40.0))
+	# Fit rows to the panel rather than always dividing by ten: on the shorter
+	# title panel that produced a 17px row pitch and 22px text, which stacked
+	# the names on top of each other.
+	var avail := size.y - 180.0
+	var row_h := clampf(avail / float(Leaderboard.TOP_N), 36.0, 58.0)
+	var max_rows := maxi(int(avail / row_h), 1)
+	var fs := int(clampf(row_h * 0.62, 22.0, 40.0))
 	if _rows.is_empty():
 		Gfx.draw_text(self, Vector2(0, y + 40), "No defenders yet. Be the first.", 32, Config.C_TEXT_DIM,
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 5)
 		return
-	for i in range(_rows.size()):
+	for i in range(mini(_rows.size(), max_rows)):
 		var e: Dictionary = _rows[i]
 		var col := Config.C_TEXT
 		var is_me: bool = highlight_id != "" and e.get("id", "") == highlight_id

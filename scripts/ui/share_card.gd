@@ -191,15 +191,13 @@ class CardArt extends Control:
 				Rect2(36, 36, 5, H - 72), Rect2(W - 41, 36, 5, H - 72)]:
 			draw_rect(r, Color(Config.C_ROCK, 0.65))
 
-		# Masthead
-		Gfx.draw_text(self, Vector2(0, 150), "CITADEL DEFENSE", 62, Config.C_SAND_LIGHT,
-			HORIZONTAL_ALIGNMENT_CENTER, W, 12)
+		# Masthead: the same lockup as the title and the loading screen.
 		var head := "CAMPAIGN"
 		if mode_id == "daily":
-			head = "DAILY SIEGE  #%d" % int(result.get("daily", 0))
+			head = "DAILY SIEGE  ·  #%d" % int(result.get("daily", 0))
 		elif mode_id == "free":
 			head = "FREE SIEGE  ·  SEED %d" % int(result.get("seed", 0))
-		Gfx.draw_text(self, Vector2(0, 206), head, 36, Config.C_ROCK, HORIZONTAL_ALIGNMENT_CENTER, W, 8)
+		Wordmark.draw(self, 148.0, W, 0.62, 0.0, head)
 
 		# The number people compare
 		var depth := int(result.get("waves", 0))
@@ -222,13 +220,14 @@ class CardArt extends Control:
 		Gfx.draw_text(self, Vector2(0, 706), str(int(result.get("score", 0))), 64, Config.C_ROCK,
 			HORIZONTAL_ALIGNMENT_CENTER, W, 10)
 
-		_draw_build(780)
-		_draw_stats(1200)
+		_draw_build(772)
+		_draw_commander(1128)
+		_draw_stats(1244)
 
 		# Call to action
-		Gfx.draw_text(self, Vector2(0, 1470), "Beat this on today's siege", 38, Config.C_TEXT,
+		Gfx.draw_text(self, Vector2(0, 1478), "Beat this on today's siege", 38, Config.C_TEXT,
 			HORIZONTAL_ALIGNMENT_CENTER, W, 8)
-		Gfx.draw_text(self, Vector2(0, 1520), "HITEX  ·  Erbil International Fair", 28, Config.C_TEXT_DIM,
+		Gfx.draw_text(self, Vector2(0, 1528), "HITEX  ·  Erbil International Fair", 28, Config.C_TEXT_DIM,
 			HORIZONTAL_ALIGNMENT_CENTER, W, 5)
 		# The emoji line, printed so it survives a screenshot
 		var emoji := str(result.get("emoji", ""))
@@ -280,6 +279,21 @@ class CardArt extends Control:
 		if boons.size() > shown:
 			Gfx.draw_text(self, Vector2(0, y + 100 + rows * 140 - 40), "+%d more" % (boons.size() - shown),
 				26, Config.C_TEXT_DIM, HORIZONTAL_ALIGNMENT_CENTER, W, 5)
+
+	## Who led the siege. Two runs with the same score and different commanders
+	## are different stories, and this is the line that says so.
+	func _draw_commander(y: float) -> void:
+		var cmd := Meta.commander_data(str(result.get("commander", "")))
+		var col: Color = cmd["color"]
+		var c := Vector2(W * 0.5 - 178, y + 34)
+		draw_circle(c, 40, Color(col, 0.16))
+		draw_arc(c, 40, 0, TAU, 30, Color(col, 0.6), 2.5)
+		DraftScreen.draw_boon_art(self, c, str(cmd["art"]), 0.30, 0.0)
+		Gfx.draw_text(self, Vector2(W * 0.5 - 118, y + 20), "LED BY", 24, Config.C_TEXT_DIM,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 5, Fonts.ui(Fonts.W_BLACK, 4))
+		Gfx.draw_text(self, Vector2(W * 0.5 - 118, y + 58), str(cmd["title"]), 34, col,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 6)
+
 
 	func _draw_stats(y: float) -> void:
 		var dur := float(result.get("duration", 0.0))

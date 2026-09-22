@@ -65,7 +65,7 @@ func _act() -> void:
 	var wave := level.next_wave if level.phase == "prep" else Game.wave
 	var wanted := _wanted_type(wave)
 	if wanted >= 0:
-		var cost := Config.tower_cost(wanted, 1)
+		var cost := Boons.tower_cost(wanted, 1)
 		if Game.can_afford(cost):
 			var slot := _best_slot(Config.TOWERS[wanted]["range"])
 			if slot != null:
@@ -86,7 +86,7 @@ func _act() -> void:
 		if key < best_key:
 			best_key = key
 			best = s.tower
-	if best != null and Game.can_afford(Config.tower_cost(best.type, best.tier + 1)):
+	if best != null and Game.can_afford(Boons.tower_cost(best.type, best.tier + 1)):
 		if _all_slots_full() or Game.rock > 200 or (strategy == "mixed" and wave >= 6):
 			level.upgrade_tower(best)
 			return

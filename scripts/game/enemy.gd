@@ -213,6 +213,12 @@ func _tick_aura(dt: float) -> void:
 		Sfx.play("heal", -22.0)
 
 
+## True while naphtha or greek fire is still eating at it. The contracts ask
+## for kills made with fire, and this is how a kill knows it was one.
+func burning() -> bool:
+	return _burn_left > 0.0
+
+
 func can_be_blocked() -> bool:
 	return type != Config.EnemyType.BOSS and type != Config.EnemyType.CART 		and type != Config.EnemyType.CATAPULT
 
@@ -284,6 +290,8 @@ func _detonate() -> void:
 # ------------------------------------------------------------------ drawing
 
 func _draw() -> void:
+	# No backing radial: every mass now carries a real outline, which separates
+	# far better than a dark pool behind it ever did.
 	# Contact shadow, offset away from the moon (upper right).
 	Gfx.draw_shadow(self, Vector2(-radius * 0.18, radius * 0.62), radius * 1.05, 0.36, 0.52)
 	if elite:
@@ -322,6 +330,31 @@ func _draw() -> void:
 	_draw_health()
 
 
+## Top of the drawn art in local units, for the health bar and the elite crown.
+## Humanoids are all drawn at one height whatever their hit radius; the siege
+## engines scale with theirs. Placing the bar off `radius` alone put it through
+## the middle of a siege tower and behind a raider's hat.
+func _art_top() -> float:
+	match type:
+		Config.EnemyType.BOSS:
+			return -radius * 4.8
+		Config.EnemyType.CATAPULT:
+			return -radius * 2.4
+		Config.EnemyType.CART:
+			return -radius * 2.0
+		Config.EnemyType.HORSE_ARCHER, Config.EnemyType.CAVALRY:
+			return -104.0
+		_:
+			return -92.0
+
+
+func _draw_backing() -> void:
+	var tex := Gfx.soft_light_texture()
+	var r := radius * 2.3
+	draw_texture_rect(tex, Rect2(-r, -r * 1.15 - radius * 0.25, r * 2.0, r * 2.0), false,
+		Color(0.03, 0.02, 0.04, 0.55))
+
+
 ## Flames licking off anything the naphtha has touched.
 func _draw_flames() -> void:
 	for i in range(4):
@@ -335,7 +368,7 @@ func _draw_flames() -> void:
 
 
 func _draw_crown() -> void:
-	var y := -radius * 2.0 - 6.0
+	var y := _art_top() - 4.0
 	var pts := PackedVector2Array([
 		Vector2(-15, y + 10), Vector2(-15, y), Vector2(-8, y + 5), Vector2(0, y - 4),
 		Vector2(8, y + 5), Vector2(15, y), Vector2(15, y + 10),
@@ -350,7 +383,7 @@ func _draw_health() -> void:
 		return
 	var w := radius * 2.3
 	var h := 9.0 if type != Config.EnemyType.BOSS else 14.0
-	var y := -radius * 1.95 - (16.0 if elite else 10.0)
+	var y := _art_top() - (16.0 if elite else 8.0)
 	var rect := Rect2(-w / 2, y, w, h)
 	# Trailing "chip" bar makes each hit legible.
 	if _chip > frac:
@@ -378,81 +411,493 @@ func _bob() -> float:
 	return sin(_anim) * 2.5
 
 
-func _legs(y: float, c: Color, spread: float = 7.0) -> void:
-	var s := sin(_anim) * spread
-	draw_line(Vector2(-4, y), Vector2(-4 + s * 0.6, y + 10), c, 5.0)
-	draw_line(Vector2(4, y), Vector2(4 - s * 0.6, y + 10), c, 5.0)
+## A cold moon edge along the top of a mass. This is the cheap half of an
+## outline: one arc per body part rather than a whole second black pass, and
+## because it is cool light on a warm road it separates by temperature even
+## where the values are close. It rides the facing flip, so it always runs down
+## the leading edge of whatever is walking at you.
+func _rim(c: Vector2, r: float, width: float = 2.6, alpha: float = 0.5) -> void:
+	draw_arc(c, r - width * 0.5, -PI * 0.78, PI * 0.06, 8, Color(Config.C_FOE_RIM, alpha * 0.55), width)
 
 
+# ---------------------------------------------------------------- the figure
+#
+# Every man on the mound is built from the same parts in the same proportions.
+# The alternative is what this game had: ten units improvised out of stacked
+# circles, none of which read as a person and several of which read as each
+# other — the raider, the sapper and the shieldman were all "dark round blob".
+#
+# Three rules, all of them about being legible at 22px on a phone:
+#
+#   Big head.   A 12px head on a 22px unit is not anatomy, it is legibility.
+#               It is the only part that still says "person" at thumbnail size,
+#               so headgear sits on the crown and never covers the face.
+#   One prop.   Each unit owns exactly one silhouette-defining object, held
+#               clear of the body so it breaks the outline: a raised sabre, a
+#               shield, a bomb, a drum. Two props make a blob again.
+#   One accent. One saturated colour per unit, on cloth, so the eye sorts the
+#               column by hue before it resolves a single shape.
+#
+# Local space: origin between the feet, -y is up, +x is the way they walk.
+# Nothing in here may call draw_set_transform: _draw() has already set the
+# facing flip, and a second call replaces it rather than composing with it.
+# Rotate points with _rot() instead.
+
+
+## Outline colour and weight. A heavy dark outline on every major mass is the
+## single most identifiable thing about the look this is aiming at, and it does
+## the separation job that the rim arc and the backing radial were both doing
+## worse and more expensively.
+const INK := Color("16121b")
+const INK_W := 2.8
+
+
+## Outlined circle, with a soft top-light. Three draws where there used to be
+## one or two — affordable, because the background bake freed more than half
+## the frame's draw calls and every unit on screen only ever accounted for 567
+## of them.
+func _oc(c: Vector2, r: float, col: Color, lit: float = 0.16) -> void:
+	draw_circle(c, r + INK_W, INK)
+	draw_circle(c, r, col)
+	if lit > 0.0:
+		draw_circle(c - Vector2(r * 0.14, r * 0.3), r * 0.68, col.lightened(lit))
+
+
+## Outlined polygon. draw_polyline rides the edge, so the fill covers its inner
+## half and what is left showing is one INK_W of outline.
+func _op(pts: PackedVector2Array, col: Color) -> void:
+	var ring := pts.duplicate()
+	ring.append(pts[0])
+	draw_polyline(ring, INK, INK_W * 2.0)
+	draw_colored_polygon(pts, col)
+
+
+## Outlined limb.
+func _ol(a: Vector2, b: Vector2, w: float, col: Color) -> void:
+	draw_line(a, b, INK, w + INK_W * 2.0)
+	draw_line(a, b, col, w)
+
+
+## Rotate a local polygon and plant it at `at`. Stands in for the transform
+## stack, which the facing flip has already spent.
+func _rot(pts: PackedVector2Array, at: Vector2, ang: float) -> PackedVector2Array:
+	var c := cos(ang)
+	var s := sin(ang)
+	var out := PackedVector2Array()
+	for p in pts:
+		out.append(at + Vector2(p.x * c - p.y * s, p.x * s + p.y * c))
+	return out
+
+
+## Two legs that swing, each ending in a boot. The trailing leg is darkened
+## rather than recoloured, which is all the depth cueing these need.
+func _legs(hip_y: float, cloth: Color, stride: float = 9.0) -> void:
+	var s := sin(_anim) * stride
+	var boot := cloth.darkened(0.34)
+	# Back leg first so the front one overlaps it cleanly.
+	for i in [1, 0]:
+		var swing := s if i == 0 else -s
+		var col := cloth.darkened(0.3) if i == 1 else cloth
+		var hip := Vector2(-2.5 if i == 1 else 2.5, hip_y)
+		var foot := hip + Vector2(swing, 18.0)
+		_ol(hip, foot, 10.0, col)
+		# Big boot. Chunky feet are half of why this style reads as toy-like
+		# rather than as a stick figure.
+		_oc(foot + Vector2(1.0, 0.5), 5.0, boot if i == 0 else boot.darkened(0.2), 0.1)
+
+
+## A coat: wide at the shoulder, narrow at the waist, with a sash across it.
+func _torso(top_y: float, bot_y: float, cloth: Color, sash: Color,
+		half_top: float = 13.0, half_bot: float = 9.5) -> void:
+	# Rounded barrel rather than a flat trapezoid: the outline has to curve or
+	# the figure reads as folded paper.
+	_op(PackedVector2Array([
+		Vector2(-half_bot, bot_y), Vector2(half_bot, bot_y),
+		Vector2(half_top + 1.0, top_y + 5.0), Vector2(half_top - 2.0, top_y - 2.0),
+		Vector2(-half_top + 2.0, top_y - 2.0), Vector2(-half_top - 1.0, top_y + 5.0),
+	]), cloth)
+	# Lit front half, so the figure has a light side without a second pass.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(1, bot_y - 1.0), Vector2(half_bot - 1.0, bot_y - 1.0),
+		Vector2(half_top - 1.0, top_y + 3.0), Vector2(1, top_y + 1.0),
+	]), cloth.lightened(0.13))
+	if sash.a > 0.0:
+		var y := lerpf(top_y, bot_y, 0.42)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-half_top, y - 3.5), Vector2(half_top, y - 6.5),
+			Vector2(half_top, y + 2.0), Vector2(-half_top, y + 5.0),
+		]), sash)
+
+
+## An arm, shoulder to hand, with the hand drawn. `back` puts it behind the
+## body in shade.
+func _arm(from: Vector2, to: Vector2, cloth: Color, back: bool = false) -> void:
+	var col := cloth.darkened(0.32) if back else cloth.lightened(0.1)
+	_ol(from, to, 7.5, col)
+	# Mitten hand. Oversized hands are the other half of the toy proportions.
+	_oc(to, 5.2, Config.C_FOE_SKIN.darkened(0.12 if back else 0.0), 0.12)
+
+
+## The head, and the reason a unit reads at all: skin, a shaded jaw, a brow
+## band and one eye. Drawn in profile facing +x.
+func _head(c: Vector2, r: float, skin: Color) -> void:
+	_oc(c, r, skin, 0.14)
+	# Jaw shadow under the cheek, so the head is a ball with a face on it
+	# rather than a ball.
+	draw_circle(c + Vector2(-r * 0.1, r * 0.42), r * 0.62, skin.darkened(0.16))
+	_face(c, r)
+
+
+## Two eyes and a pair of angry brows, in three-quarter view. This is the whole
+## difference between a soldier and a bead: a unit with an expression reads as
+## something that wants to kill you even at 22px.
+func _face(c: Vector2, r: float) -> void:
+	var near := c + Vector2(r * 0.42, -r * 0.02)
+	var far := c + Vector2(r * 0.02, -r * 0.06)
+	draw_circle(far, r * 0.21, Color("f4f0ea"))
+	draw_circle(near, r * 0.26, Color("f4f0ea"))
+	draw_circle(far + Vector2(r * 0.06, r * 0.02), r * 0.115, INK)
+	draw_circle(near + Vector2(r * 0.07, r * 0.02), r * 0.145, INK)
+	draw_line(far + Vector2(-r * 0.2, -r * 0.3), far + Vector2(r * 0.18, -r * 0.2), INK, r * 0.15)
+	draw_line(near + Vector2(-r * 0.2, -r * 0.22), near + Vector2(r * 0.24, -r * 0.34), INK, r * 0.17)
+
+
+## A Mongol fur cap: a dome on the crown with a turned-up brim. The old art
+## dropped a full-size dark circle over the whole head, which is exactly how
+## every raider became an anonymous ball.
+func _cap_fur(c: Vector2, r: float, fur: Color) -> void:
+	_oc(c + Vector2(0.5, -r * 0.62), r * 0.82, fur, 0.18)
+	_op(PackedVector2Array([
+		c + Vector2(-r * 1.02, -r * 0.5), c + Vector2(r * 1.02, -r * 0.5),
+		c + Vector2(r * 0.96, -r * 0.82), c + Vector2(-r * 0.96, -r * 0.82),
+	]), fur.lightened(0.24))
+	_oc(c + Vector2(0.5, -r * 1.5), r * 0.16, Config.C_FOE_CLOTH, 0.0)
+
+
+## A conical steel helm with a brow band and a nose guard.
+func _helm(c: Vector2, r: float, steel: Color) -> void:
+	_op(PackedVector2Array([
+		c + Vector2(-r * 1.02, -r * 0.38), c + Vector2(r * 1.02, -r * 0.38),
+		c + Vector2(r * 0.2, -r * 1.9),
+	]), steel)
+	draw_colored_polygon(PackedVector2Array([
+		c + Vector2(0, -r * 0.42), c + Vector2(r * 0.9, -r * 0.42),
+		c + Vector2(r * 0.2, -r * 1.75),
+	]), steel.lightened(0.3))
+	_op(PackedVector2Array([
+		c + Vector2(-r * 1.06, -r * 0.56), c + Vector2(r * 1.06, -r * 0.56),
+		c + Vector2(r * 1.06, -r * 0.26), c + Vector2(-r * 1.06, -r * 0.26),
+	]), steel.darkened(0.32))
+	draw_rect(Rect2(c.x + r * 0.46, c.y - r * 0.5, r * 0.24, r * 0.86), steel.darkened(0.12))
+
+
+## A curved sabre, filled rather than stroked: an arc at this size reads as a
+## bent piece of wire.
+func _sabre(hilt: Vector2, ang: float, length: float = 30.0) -> void:
+	var outer := PackedVector2Array()
+	var inner := PackedVector2Array()
+	for i in range(9):
+		var a := lerpf(-0.3, 1.45, float(i) / 8.0)
+		outer.append(Vector2(cos(a), -sin(a)) * length)
+	for i in range(8, -1, -1):
+		var t := float(i) / 8.0
+		var a := lerpf(-0.3, 1.45, t)
+		inner.append(Vector2(cos(a), -sin(a)) * (length - lerpf(6.0, 1.5, t)))
+	draw_colored_polygon(_rot(outer + inner, hilt, ang), Config.C_IRON.lightened(0.2))
+	draw_colored_polygon(_rot(inner, hilt, ang), Config.C_IRON.lightened(0.45))
+	draw_colored_polygon(_rot(PackedVector2Array([
+		Vector2(-4, -3.5), Vector2(8, -3.5), Vector2(8, 3.5), Vector2(-4, 3.5),
+	]), hilt, ang), Config.C_FOE_TIMBER_DARK)
+
+
+## A horse in profile. Both mounted units share it, so a horse reads as a horse
+## either way and the difference between them is the rider and the barding.
+func _horse(hide: Color, tack: Color, barded: bool = false) -> void:
+	var g := sin(_anim * 1.25)
+	var dark := hide.darkened(0.34)
+	var g2 := sin(_anim * 1.25 + 2.3)
+	# Far pair first, in shade.
+	for spec in [[-15.0, g2], [17.0, -g2]]:
+		var x: float = spec[0]
+		var sw: float = spec[1]
+		draw_line(Vector2(x, -14), Vector2(x + sw * 8.0, 11), dark.darkened(0.2), 5.5)
+		draw_rect(Rect2(x + sw * 8.0 - 3.5, 9.0, 7.0, 4.0), dark.darkened(0.35))
+	# Barrel, rump and chest.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-25, -13), Vector2(21, -15), Vector2(25, -29), Vector2(-21, -31),
+	]), hide)
+	draw_circle(Vector2(-20, -22), 12.0, hide)
+	draw_circle(Vector2(19, -22), 11.0, hide.lightened(0.08))
+	# Neck and head.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(15, -28), Vector2(26, -24), Vector2(38, -44), Vector2(28, -49),
+	]), hide.lightened(0.05))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(28, -49), Vector2(38, -44), Vector2(48, -46), Vector2(46, -53),
+		Vector2(34, -55),
+	]), hide.lightened(0.1))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(31, -55), Vector2(35, -63), Vector2(38, -54),
+	]), dark)
+	draw_circle(Vector2(45, -49), 1.8, Color("120f16"))
+	# Mane and tail.
+	for i in range(5):
+		var t := float(i) / 4.0
+		var p := Vector2(28, -49).lerp(Vector2(17, -29), t)
+		draw_line(p, p + Vector2(-5, -4), dark, 3.5)
+	for i in range(3):
+		draw_line(Vector2(-24, -27 + i * 2), Vector2(-38 - i * 2, -12 + i * 5 + g * 3), dark, 3.5)
+	# Near pair, lit.
+	for spec2 in [[-13.0, -g], [19.0, g]]:
+		var x2: float = spec2[0]
+		var sw2: float = spec2[1]
+		draw_line(Vector2(x2, -14), Vector2(x2 + sw2 * 8.0, 11), hide.darkened(0.12), 6.0)
+		draw_rect(Rect2(x2 + sw2 * 8.0 - 3.5, 9.0, 7.0, 4.5), dark.darkened(0.2))
+	if barded:
+		# Lamellar skirt over the flank.
+		for i in range(4):
+			draw_rect(Rect2(-18 + i * 11, -20, 9, 13), Color(Config.C_IRON, 0.75))
+			draw_rect(Rect2(-18 + i * 11, -20, 9, 3), Color(Config.C_IRON.lightened(0.3), 0.8))
+	# Saddle blanket: the accent that says which side this horse is on.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-12, -30), Vector2(10, -31), Vector2(13, -20), Vector2(-15, -19),
+	]), tack)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-15, -19), Vector2(13, -20), Vector2(12, -16), Vector2(-14, -15),
+	]), tack.darkened(0.3))
+	_rim(Vector2(19, -22), 11.0, 2.4, 0.4)
+
+
+## Fodder, and the unit the player sees a hundred times a run, so it carries
+## the most design: crimson sash, fur cap, and a sabre held high where it
+## breaks the head's outline and makes the silhouette unmistakable.
 func _draw_raider() -> void:
 	var b := _bob()
-	var body := Color("4a3222")
-	var skin := Color("d9a372")
-	_legs(2, Color("2b1f14"))
-	# Torso with a lit shoulder
-	draw_circle(Vector2(0, -12 + b), 16, body)
-	draw_circle(Vector2(-4, -16 + b), 11, body.lightened(0.12))
-	draw_rect(Rect2(-14, -14 + b, 28, 8), Config.C_THREAT)
-	draw_rect(Rect2(-14, -14 + b, 28, 3), Config.C_THREAT.lightened(0.25))
-	# Head and fur hat
-	draw_circle(Vector2(0, -34 + b), 11, skin)
-	draw_circle(Vector2(-3, -36 + b), 7, skin.lightened(0.12))
-	draw_circle(Vector2(0, -40 + b), 11, Color("2b1f14"))
-	draw_rect(Rect2(-13, -40 + b, 26, 6), Color("3a2a1c"))
-	# Curved sword catching the moon
-	draw_arc(Vector2(18, -24 + b), 14, -1.9, -0.3, 8, Config.C_IRON, 3.5)
-	draw_arc(Vector2(18, -24 + b), 14, -1.6, -0.7, 6, Config.C_IRON.lightened(0.4), 1.4)
-	draw_line(Vector2(14, -14 + b), Vector2(19, -12 + b), Config.C_WOOD_DARK, 4.0)
+	var cloth := Config.C_FOE_BODY
+	var hc := Vector2(1.0, -42.0 + b)
+	_sabre(Vector2(-13, -38 + b), -1.05, 23.0)
+	_arm(Vector2(-6, -30 + b), Vector2(-14, -40 + b), cloth, true)
+	_legs(-11.0 + b, Config.C_FOE_DARK.lightened(0.1), 9.0)
+	_torso(-33.0 + b, -9.0 + b, cloth, Config.C_FOE_CLOTH)
+	_head(hc, 14.5, Config.C_FOE_SKIN)
+	_cap_fur(hc, 14.5, Config.C_FOE_DARK)
+	_arm(Vector2(6, -29 + b), Vector2(19, -22 + b), cloth)
 
 
+## Punishes gaps in coverage, so it has to read as SPEED before it reads as
+## anything else: thin, pitched forward, and trailing two ribbons of scarf.
 func _draw_runner() -> void:
-	var b := _bob()
-	var body := Color("c9a63a")
-	_legs(0, Color("6b5a2a"), 11.0)
-	draw_circle(Vector2(0, -12 + b), 12, body)
-	draw_circle(Vector2(-3, -15 + b), 8, body.lightened(0.14))
-	draw_circle(Vector2(0, -31 + b), 9, Color("d9a372"))
-	# Trailing scarf, two ribbons out of phase
-	var s := sin(_anim * 1.3) * 4.0
-	var s2 := sin(_anim * 1.3 - 0.9) * 5.0
-	draw_colored_polygon(PackedVector2Array([Vector2(-6, -30 + b), Vector2(-26, -26 + b + s), Vector2(-24, -20 + b + s), Vector2(-4, -24 + b)]), Config.C_THREAT)
-	draw_colored_polygon(PackedVector2Array([Vector2(-6, -27 + b), Vector2(-32, -19 + b + s2), Vector2(-30, -14 + b + s2), Vector2(-4, -21 + b)]), Config.C_THREAT_DARK)
-	draw_line(Vector2(6, -18 + b), Vector2(20, -30 + b), Config.C_IRON, 2.5)
+	var b := _bob() * 1.4
+	var cloth := Config.C_FOE_BODY_HI.lightened(0.05)
+	var hc := Vector2(3.0, -38.0 + b)
+	var s := sin(_anim * 1.2) * 5.0
+	var s2 := sin(_anim * 1.2 - 0.8) * 7.0
+	# Scarf first: it is most of the silhouette. Tapered to a point and in the
+	# faction's accent, against a plain leather body so it is clearly cloth in
+	# the wind and not a limb.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2, -37 + b), Vector2(-2, -25 + b), Vector2(-20, -20 + b + s2),
+		Vector2(-34, -27 + b + s), Vector2(-19, -30 + b + s2 * 0.5),
+	]), Config.C_FOE_CLOTH)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2, -30 + b), Vector2(-2, -25 + b), Vector2(-20, -20 + b + s2),
+	]), Config.C_FOE_CLOTH_DARK)
+	_legs(-10.0 + b, Config.C_FOE_DARK.lightened(0.18), 13.0)
+	_torso(-30.0 + b, -8.0 + b, cloth, Config.C_FOE_CLOTH, 10.5, 7.5)
+	_head(hc, 13.0, Config.C_FOE_SKIN)
+	# Topknot rather than a cap: bare-headed reads as light and fast.
+	draw_circle(hc + Vector2(-1, -9), 5.0, Config.C_FOE_DARK)
+	draw_line(hc + Vector2(-4, -11), hc + Vector2(-13, -16), Config.C_FOE_DARK, 3.5)
+	# Knife, thrown forward.
+	_arm(Vector2(5, -27 + b), Vector2(20, -31 + b), cloth)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(21, -33 + b), Vector2(36, -34 + b), Vector2(21, -29 + b),
+	]), Config.C_IRON.lightened(0.25))
 
 
+## Armour with legs. The shield is the whole silhouette, so it sits forward and
+## low and the head is deliberately kept above its rim — a unit whose face you
+## cannot see is a unit the player cannot read.
 func _draw_shieldman() -> void:
-	var b := _bob() * 0.6
-	_legs(6, Color("2b1f14"))
-	draw_circle(Vector2(0, -10 + b), 18, Color("3a2a1c"))
-	draw_circle(Vector2(-5, -14 + b), 12, Color("48362a"))
-	draw_circle(Vector2(0, -36 + b), 11, Color("d9a372"))
-	draw_rect(Rect2(-12, -50 + b, 24, 10), Config.C_IRON_DARK)  # helmet
-	draw_rect(Rect2(-12, -50 + b, 24, 3), Config.C_IRON)
-	# Spear
-	draw_line(Vector2(-16, 10 + b), Vector2(-10, -62 + b), Config.C_WOOD, 3.5)
-	draw_colored_polygon(PackedVector2Array([Vector2(-10, -62 + b), Vector2(-16, -70 + b), Vector2(-4, -70 + b)]), Config.C_IRON)
-	# Big round shield, riveted
-	draw_circle(Vector2(8, -14 + b), 28, Color(0, 0, 0, 0.3))
-	draw_circle(Vector2(6, -16 + b), 26, Config.C_IRON_DARK)
-	draw_circle(Vector2(6, -16 + b), 22, Config.C_IRON)
-	draw_circle(Vector2(2, -20 + b), 14, Config.C_IRON.lightened(0.14))
-	draw_circle(Vector2(6, -16 + b), 8, Config.C_THREAT)
-	draw_arc(Vector2(6, -16 + b), 15, 0, TAU, 20, Config.C_IRON_DARK, 2.0)
-	for i in range(6):
-		var a := float(i) / 6.0 * TAU
-		draw_circle(Vector2(6, -16 + b) + Vector2(cos(a), sin(a)) * 19.0, 2.0, Config.C_IRON_DARK)
+	var b := _bob() * 0.55
+	var cloth := Config.C_FOE_BODY.darkened(0.1)
+	var hc := Vector2(-2.0, -46.0 + b)
+	# Spear, angled back over the shoulder.
+	draw_line(Vector2(-14, 8 + b), Vector2(-2, -70 + b), Config.C_FOE_TIMBER, 4.0)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2, -70 + b), Vector2(-8, -80 + b), Vector2(4, -80 + b),
+	]), Config.C_IRON.lightened(0.2))
+	_legs(-13.0 + b, Config.C_FOE_DARK, 6.0)
+	_torso(-36.0 + b, -11.0 + b, cloth, Config.C_FOE_CLOTH_DARK, 14.0, 10.5)
+	_head(hc, 14.0, Config.C_FOE_SKIN)
+	_helm(hc, 14.0, Config.C_IRON)
+	# The shield: planted in front, rim proud, boss catching the light.
+	var sc := Vector2(15, -24 + b)
+	draw_circle(sc + Vector2(2, 3), 25.0, Color(0, 0, 0, 0.35))
+	draw_circle(sc, 25.0, Config.C_IRON_DARK)
+	draw_circle(sc, 21.5, Config.C_FOE_TIMBER)
+	for i in range(5):
+		var a := -PI * 0.5 + float(i) / 5.0 * TAU
+		draw_line(sc, sc + Vector2(cos(a), sin(a)) * 21.0, Config.C_FOE_TIMBER_DARK, 2.5)
+	draw_circle(sc, 8.5, Config.C_FOE_CLOTH)
+	draw_circle(sc + Vector2(-2, -2), 5.0, Config.C_IRON.lightened(0.3))
+	draw_arc(sc, 23.0, 0, TAU, 28, Config.C_IRON_DARK, 3.0)
+	_rim(sc, 25.0, 3.0, 0.55)
+
+
+## Hunched around the charge he is carrying. The bomb is the silhouette and the
+## lit fuse is the warning: both are held out front where they cannot be missed.
+func _draw_sapper() -> void:
+	var b := _bob()
+	var cloth := Config.C_FOE_BODY.darkened(0.18)
+	var hc := Vector2(-1.0, -38.0 + b)
+	var fuse := 0.5 + 0.5 * sin(_anim * 4.0)
+	_legs(-10.0 + b, Config.C_FOE_DARK, 7.0)
+	_torso(-30.0 + b, -8.0 + b, cloth, Color(0, 0, 0, 0), 12.5, 10.0)
+	_head(hc, 13.5, Config.C_FOE_SKIN)
+	# Hood, drawn over the crown and down the back of the neck.
+	draw_colored_polygon(PackedVector2Array([
+		hc + Vector2(-13, 4), hc + Vector2(-13, -9), hc + Vector2(-2, -15),
+		hc + Vector2(6, -11), hc + Vector2(-3, -8), hc + Vector2(-5, 7),
+	]), cloth.lightened(0.18))
+	draw_circle(hc + Vector2(-5, -9), 6.0, cloth.lightened(0.26))
+	# The charge, hugged to the chest.
+	var bc := Vector2(17, -22 + b)
+	draw_circle(bc + Vector2(1, 2), 13.0, Color(0, 0, 0, 0.3))
+	draw_circle(bc, 12.5, Config.C_IRON_DARK)
+	draw_circle(bc + Vector2(-3, -4), 6.0, Config.C_IRON.lightened(0.15))
+	draw_rect(Rect2(bc.x - 3, bc.y - 16, 7, 6), Config.C_FOE_TIMBER_DARK)
+	_arm(Vector2(6, -26 + b), Vector2(12, -20 + b), cloth)
+	# Fuse, sparking.
+	draw_line(bc + Vector2(0, -15), bc + Vector2(8, -27), Config.C_FOE_TIMBER_DARK, 2.5)
+	draw_circle(bc + Vector2(8, -27), 4.5 * fuse + 2.0, Color(Config.C_FIRE, 0.35))
+	draw_circle(bc + Vector2(8, -27), 2.4 * fuse + 1.2, Config.C_FIRE_HOT)
+
+
+## Heals the column, so it is the real target and has to announce itself: the
+## tallest humanoid, robed in the colour of the aura it projects, with an
+## antlered headdress breaking the outline.
+func _draw_shaman() -> void:
+	var b := _bob() * 0.7
+	var pulse := 0.5 + 0.5 * sin(_anim * 1.3)
+	var robe := Config.C_GOOD.darkened(0.42)
+	var hc := Vector2(0.0, -46.0 + b)
+	draw_circle(Vector2(0, -24 + b), radius * 1.55, Color(Config.C_GOOD, 0.07 + 0.05 * pulse))
+	# Staff, held back, with a ring of bone at the top.
+	draw_line(Vector2(-18, 10 + b), Vector2(-14, -56 + b), Config.C_FOE_TIMBER, 4.5)
+	draw_arc(Vector2(-14, -62 + b), 7.0, 0, TAU, 18, Color("d8cbb0"), 3.2)
+	draw_circle(Vector2(-14, -62 + b), 3.0, Config.C_GOOD)
+	for i in range(3):
+		var fa := float(i) / 3.0 * TAU + _anim * 0.3
+		draw_line(Vector2(-14, -62 + b), Vector2(-14, -62 + b) + Vector2(cos(fa), sin(fa)) * 11.0,
+			Color(Config.C_GOOD, 0.45), 1.8)
+	_legs(-12.0 + b, robe.darkened(0.3), 5.0)
+	# A robe, not a coat: it falls to the ankles.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-17, 8 + b), Vector2(17, 8 + b), Vector2(12, -34 + b), Vector2(-12, -34 + b),
+	]), robe)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(1, 8 + b), Vector2(17, 8 + b), Vector2(12, -34 + b), Vector2(1, -34 + b),
+	]), robe.lightened(0.14))
+	draw_circle(Vector2(0, -32 + b), 13.0, robe)
+	_rim(Vector2(0, -32 + b), 13.0)
+	_head(hc, 13.5, Config.C_FOE_SKIN)
+	# Antlered headdress.
+	_oc(hc + Vector2(0, -9), 9.5, Config.C_FOE_DARK, 0.15)
+	# Antlers, rooted in the headdress rather than hovering over it, and thick
+	# enough to survive being 22px tall.
+	for side in [-1.0, 1.0]:
+		var root := hc + Vector2(side * 6, -12)
+		var mid := hc + Vector2(side * 14, -24)
+		var tip := hc + Vector2(side * 13, -34)
+		draw_line(root, mid, Color("d8cbb0"), 4.0)
+		draw_line(mid, tip, Color("d8cbb0"), 3.4)
+		draw_line(mid, hc + Vector2(side * 24, -25), Color("d8cbb0"), 3.0)
+		draw_circle(tip, 1.8, Color("efe6d2"))
+	# Frame drum, struck on the beat.
+	var beat := 1.0 + 0.1 * sin(_anim * 3.0)
+	var dc := Vector2(19, -22 + b)
+	draw_circle(dc + Vector2(1, 2), 15.0 * beat, Color(0, 0, 0, 0.3))
+	draw_circle(dc, 14.5 * beat, Config.C_FOE_TIMBER_DARK)
+	draw_circle(dc, 11.5 * beat, Color("c8ab84"))
+	draw_arc(dc, 11.5 * beat, 0, TAU, 20, Config.C_FOE_TIMBER_DARK, 1.6)
+	draw_line(Vector2(-6, -26 + b), Vector2(9, -20 + b + sin(_anim * 3.0) * 4.0),
+		Config.C_FOE_TIMBER, 2.8)
+
+
+## Mounted bowman: fast, and harasses emplacements from outside oil range. The
+## read is the Parthian shot — twisted in the saddle, bow drawn.
+func _draw_horse_archer() -> void:
+	var b := _bob() * 0.4
+	var cloth := Config.C_FOE_BODY
+	var hc := Vector2(-2.0, -58.0 + b)
+	_horse(Config.C_FOE_HORSE, Config.C_FOE_CLOTH)
+	# Rider: legs astride, torso, head.
+	draw_line(Vector2(0, -32 + b), Vector2(8, -18 + b), cloth.darkened(0.25), 7.0)
+	_torso(-48.0 + b, -28.0 + b, cloth, Config.C_FOE_CLOTH, 11.0, 9.0)
+	_head(hc, 13.5, Config.C_FOE_SKIN)
+	_cap_fur(hc, 13.5, Config.C_FOE_DARK)
+	# Recurve bow, drawn.
+	var pull: float = 1.0 if _attack_cd > 0.45 else 0.45
+	# Held high and inboard so it clears the horse's neck entirely.
+	var bc := Vector2(10, -58 + b)
+	for arc in [[-2.1, -0.2], [0.2, 2.1]]:
+		var a0: float = arc[0]
+		var a1: float = arc[1]
+		draw_arc(bc, 14.0, a0, a1, 10, Config.C_FOE_TIMBER_DARK, 3.4)
+	draw_line(bc + Vector2(cos(-2.1), sin(-2.1)) * 14.0, bc + Vector2(-6 * pull, 0),
+		Color("e8dcc0"), 1.6)
+	draw_line(bc + Vector2(cos(2.1), sin(2.1)) * 14.0, bc + Vector2(-6 * pull, 0),
+		Color("e8dcc0"), 1.6)
+	draw_line(bc + Vector2(-6 * pull, 0), bc + Vector2(18, 0), Color("e8dcc0"), 2.0)
+	_arm(Vector2(4, -48 + b), bc + Vector2(-4, 2), cloth)
+	# Quiver on the back.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-16, -44 + b), Vector2(-8, -46 + b), Vector2(-6, -30 + b), Vector2(-14, -28 + b),
+	]), Config.C_FOE_TIMBER_DARK)
+	for i in range(3):
+		draw_line(Vector2(-14 + i * 3, -45 + b), Vector2(-17 + i * 3, -57 + b), Color("e8dcc0"), 1.6)
+
+
+## Keshik heavy horse: armoured, quick, and two lives at the gate. Barded horse,
+## couched lance, and a tall plume so it stands above everything around it.
+func _draw_cavalry() -> void:
+	var b := _bob() * 0.35
+	var hc := Vector2(-2.0, -58.0 + b)
+	_horse(Config.C_FOE_HORSE.darkened(0.12), Config.C_FOE_CLOTH_DARK, true)
+	draw_line(Vector2(0, -32 + b), Vector2(8, -18 + b), Config.C_IRON_DARK, 7.5)
+	# Lamellar coat rather than cloth.
+	_torso(-48.0 + b, -28.0 + b, Config.C_IRON_DARK, Color(0, 0, 0, 0), 12.5, 10.0)
+	for i in range(3):
+		draw_rect(Rect2(-12, -45 + b + i * 6, 25, 4.5), Color(Config.C_IRON, 0.85))
+	_head(hc, 13.5, Config.C_FOE_SKIN)
+	_helm(hc, 13.5, Config.C_IRON.lightened(0.1))
+	# Plume: the tallest thing in the wave, which is the point.
+	for i in range(4):
+		var t := float(i) / 3.0
+		draw_line(hc + Vector2(2, -21 - i * 4), hc + Vector2(6 - t * 10, -28 - i * 5),
+			Config.C_FOE_CLOTH, 3.0 - t)
+	# Couched lance, levelled forward.
+	draw_line(Vector2(-22, -36 + b), Vector2(44, -44 + b), Config.C_FOE_TIMBER, 4.5)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(44, -48 + b), Vector2(60, -44 + b), Vector2(44, -40 + b),
+	]), Config.C_IRON.lightened(0.3))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(28, -43 + b), Vector2(40, -41 + b), Vector2(28, -35 + b),
+	]), Config.C_FOE_CLOTH)
+	_arm(Vector2(4, -42 + b), Vector2(16, -40 + b), Config.C_IRON_DARK)
 
 
 func _draw_cart() -> void:
 	var wob := sin(_anim * 0.7) * 1.5
 	for wx in [-26.0, 26.0]:
-		draw_circle(Vector2(wx, 14), 15, Config.C_WOOD_DARK)
-		draw_circle(Vector2(wx, 14), 10, Config.C_WOOD)
+		draw_circle(Vector2(wx, 14), 15, Config.C_FOE_TIMBER_DARK)
+		draw_circle(Vector2(wx, 14), 10, Config.C_FOE_TIMBER)
 		var a := _anim * 0.5
-		draw_line(Vector2(wx, 14) + Vector2(cos(a), sin(a)) * 10, Vector2(wx, 14) - Vector2(cos(a), sin(a)) * 10, Config.C_WOOD_DARK, 3.0)
-		draw_line(Vector2(wx, 14) + Vector2(-sin(a), cos(a)) * 10, Vector2(wx, 14) - Vector2(-sin(a), cos(a)) * 10, Config.C_WOOD_DARK, 3.0)
-	draw_rect(Rect2(-40, -30 + wob, 80, 44), Config.C_WOOD)
-	draw_rect(Rect2(-40, -30 + wob, 80, 8), Config.C_WOOD_DARK)
+		draw_line(Vector2(wx, 14) + Vector2(cos(a), sin(a)) * 10, Vector2(wx, 14) - Vector2(cos(a), sin(a)) * 10, Config.C_FOE_TIMBER_DARK, 3.0)
+		draw_line(Vector2(wx, 14) + Vector2(-sin(a), cos(a)) * 10, Vector2(wx, 14) - Vector2(-sin(a), cos(a)) * 10, Config.C_FOE_TIMBER_DARK, 3.0)
+	draw_rect(Rect2(-40, -30 + wob, 80, 44), Config.C_FOE_TIMBER)
+	draw_rect(Rect2(-40, -30 + wob, 80, 8), Config.C_FOE_TIMBER_DARK)
 	draw_rect(Rect2(-40, -22 + wob, 80, 4), Color(Config.C_SAND_LIGHT, 0.18))
 	for i in range(3):
 		draw_rect(Rect2(-38 + i * 28, -32 + wob, 6, 48), Config.C_IRON_DARK)
@@ -464,167 +909,87 @@ func _draw_cart() -> void:
 	var f := 1.0 + sin(_anim * 3.0) * 0.2
 	draw_circle(Vector2(0, -36 + wob), 9 * f, Config.C_FIRE)
 	draw_circle(Vector2(0, -40 + wob), 5 * f, Config.C_FIRE_HOT)
-	draw_line(Vector2(-30, -30 + wob), Vector2(-30, -70 + wob), Config.C_WOOD_DARK, 3.0)
-	draw_colored_polygon(PackedVector2Array([Vector2(-30, -70 + wob), Vector2(-6, -62 + wob), Vector2(-30, -52 + wob)]), Config.C_THREAT)
+	draw_line(Vector2(-30, -30 + wob), Vector2(-30, -70 + wob), Config.C_FOE_TIMBER_DARK, 3.0)
+	draw_colored_polygon(PackedVector2Array([Vector2(-30, -70 + wob), Vector2(-6, -62 + wob), Vector2(-30, -52 + wob)]), Config.C_FOE_CLOTH)
 
 
+## The siege tower, and the campaign's last wave. It has to read as a machine
+## coming to kill you, not as a chest of drawers: so it tapers like a tower,
+## carries a hide-clad face against fire, and the boarding ramp is already
+## half-down before it reaches the gate.
 func _draw_boss() -> void:
 	var wob := sin(_anim * 0.5) * 2.0
-	for wx in [-44.0, -15.0, 15.0, 44.0]:
-		draw_circle(Vector2(wx, 26), 13, Config.C_WOOD_DARK)
-		draw_circle(Vector2(wx, 26), 8, Config.C_WOOD)
-	var base := Rect2(-55, -150 + wob, 110, 176)
-	draw_rect(base, Config.C_WOOD)
-	draw_rect(Rect2(-55, -150 + wob, 14, 176), Config.C_WOOD_DARK)
-	draw_rect(Rect2(-30, -150 + wob, 10, 176), Color(Config.C_SAND_LIGHT, 0.08))
+	var timber := Config.C_FOE_TIMBER
+	var dark := Config.C_FOE_TIMBER_DARK
+	for wx in [-46.0, -16.0, 16.0, 46.0]:
+		draw_circle(Vector2(wx, 28), 14, dark)
+		draw_circle(Vector2(wx, 28), 9, timber)
+		draw_circle(Vector2(wx, 28), 3, dark)
+	# Tapered body. A rectangle reads as a cupboard; a taper reads as a tower.
+	var top := -176.0 + wob
+	var bot := 26.0 + wob
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-58, bot), Vector2(58, bot), Vector2(46, top), Vector2(-46, top),
+	]), timber)
+	# Lit leading half.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(4, bot), Vector2(58, bot), Vector2(46, top), Vector2(4, top),
+	]), timber.lightened(0.09))
+	# Cross-bracing: the single thing that says "built in a hurry out of beams".
 	for i in range(3):
-		var y := -140.0 + i * 56.0 + wob
-		draw_rect(Rect2(-55, y + 46, 110, 8), Config.C_WOOD_DARK)
-		draw_rect(Rect2(-18, y + 10, 36, 22), Config.C_WINDOW)
-		draw_rect(Rect2(-16, y + 12, 32, 18), Color(Config.C_FIRE, 0.35))
-		draw_rect(Rect2(-48, y + 14, 8, 14), Config.C_WINDOW)
-		draw_rect(Rect2(40, y + 14, 8, 14), Config.C_WINDOW)
-	# Iron plating on the leading face
-	draw_rect(Rect2(41, -150 + wob, 14, 176), Config.C_IRON_DARK)
-	for i in range(6):
-		draw_circle(Vector2(48, -140 + wob + i * 30), 2.5, Config.C_IRON)
-	# Top platform with crew
-	draw_rect(Rect2(-62, -166 + wob, 124, 18), Config.C_WOOD_DARK)
-	draw_rect(Rect2(-62, -166 + wob, 124, 4), Color(Config.C_SAND_LIGHT, 0.15))
+		var y0 := bot - (bot - top) * float(i) / 3.0
+		var y1 := bot - (bot - top) * float(i + 1) / 3.0
+		var w0 := lerpf(58.0, 46.0, float(i) / 3.0)
+		var w1 := lerpf(58.0, 46.0, float(i + 1) / 3.0)
+		draw_line(Vector2(-w0 + 8, y0 - 6), Vector2(w1 - 8, y1 + 6), dark, 5.0)
+		draw_line(Vector2(w0 - 8, y0 - 6), Vector2(-w1 + 8, y1 + 6), dark, 5.0)
+		draw_rect(Rect2(-w1, y1 - 5, w1 * 2.0, 10), dark)
+	# Fire-proofing: soaked ox hides pegged over the leading face.
 	for i in range(4):
-		draw_rect(Rect2(-60 + i * 34, -176 + wob, 14, 12), Config.C_WOOD_DARK)
-	for hx in [-30.0, 0.0, 30.0]:
-		draw_circle(Vector2(hx, -186 + wob), 7, Color("d9a372"))
-		draw_circle(Vector2(hx, -192 + wob), 7, Color("2b1f14"))
-	# Signal fire on the roof
-	var f := 1.0 + sin(_anim * 4.0) * 0.22
-	draw_circle(Vector2(0, -172 + wob), 16 * f, Color(Config.C_FIRE, 0.25))
-	draw_circle(Vector2(0, -174 + wob), 8 * f, Config.C_FIRE)
-	draw_circle(Vector2(0, -178 + wob), 4 * f, Config.C_FIRE_HOT)
-	for bx in [-50.0, 50.0]:
-		draw_line(Vector2(bx, -166 + wob), Vector2(bx, -230 + wob), Config.C_WOOD_DARK, 4.0)
-		draw_colored_polygon(PackedVector2Array([Vector2(bx, -230 + wob), Vector2(bx + 34, -218 + wob), Vector2(bx, -200 + wob)]), Config.C_THREAT)
-
-
-## Mounted bowman: fast, harasses emplacements from outside oil range.
-func _draw_horse_archer() -> void:
-	var b := _bob() * 0.5
-	var gallop := sin(_anim * 1.4)
-	# Horse
-	draw_line(Vector2(-20, 8), Vector2(-22 + gallop * 7, 22), Color("2f2118"), 5.0)
-	draw_line(Vector2(14, 8), Vector2(16 - gallop * 7, 22), Color("2f2118"), 5.0)
-	draw_line(Vector2(-8, 10), Vector2(-10 - gallop * 5, 22), Color("241a12"), 5.0)
-	draw_line(Vector2(22, 10), Vector2(24 + gallop * 5, 22), Color("241a12"), 5.0)
-	draw_rect(Rect2(-24, -8 + b * 0.5, 50, 20), Color("4a3626"))
-	draw_rect(Rect2(-24, -8 + b * 0.5, 50, 6), Color("5c4431"))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(24, -6 + b * 0.5), Vector2(40, -20 + b * 0.5), Vector2(46, -12 + b * 0.5),
-		Vector2(34, -2 + b * 0.5), Vector2(24, 4 + b * 0.5),
-	]), Color("4a3626"))
-	draw_circle(Vector2(41, -17 + b * 0.5), 3.0, Color("120d08"))
-	# Tail
-	draw_line(Vector2(-24, -4 + b * 0.5), Vector2(-38, 8 + gallop * 3), Color("2f2118"), 4.0)
-	# Rider
-	draw_circle(Vector2(-2, -24 + b), 12, Color("6b4a2c"))
-	draw_rect(Rect2(-14, -26 + b, 24, 6), Config.C_THREAT)
-	draw_circle(Vector2(-2, -42 + b), 9, Color("d9a372"))
-	draw_circle(Vector2(-2, -47 + b), 9, Color("2b1f14"))
-	# Recurve bow, drawn back
-	var pull := 1.0 if _attack_cd > 0.45 else 0.4
-	var bc := Vector2(12, -32 + b)
-	draw_arc(bc, 15, -2.0, 2.0, 12, Config.C_WOOD_DARK, 3.0)
-	draw_line(bc + Vector2(cos(-2.0), sin(-2.0)) * 15, bc + Vector2(-6 * pull, 0),
-		Config.C_SAND_LIGHT, 1.5)
-	draw_line(bc + Vector2(cos(2.0), sin(2.0)) * 15, bc + Vector2(-6 * pull, 0),
-		Config.C_SAND_LIGHT, 1.5)
-	# Quiver
-	draw_rect(Rect2(-20, -30 + b, 9, 18), Config.C_WOOD_DARK)
+		var hy := top + 16.0 + i * 44.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(30, hy), Vector2(54, hy - 3), Vector2(54, hy + 40), Vector2(30, hy + 42),
+		]), Color("6b5a44"))
+		draw_line(Vector2(32, hy + 2), Vector2(52, hy - 1), Color("50412f"), 2.5)
+	# Archer slits with crew behind them.
 	for i in range(3):
-		draw_line(Vector2(-18 + i * 3, -30 + b), Vector2(-20 + i * 3, -42 + b), Config.C_SAND_LIGHT, 1.5)
-
-
-## Keshik heavy horse: armoured, quick, costs two lives at the gate.
-func _draw_cavalry() -> void:
-	var b := _bob() * 0.4
-	var gallop := sin(_anim * 1.2)
-	for lx in [-22.0, 16.0, -6.0, 26.0]:
-		draw_line(Vector2(lx, 8), Vector2(lx + gallop * 6, 24), Color("241a12"), 6.0)
-	# Barded horse
-	draw_rect(Rect2(-28, -10 + b, 58, 24), Color("3a2a1c"))
-	draw_rect(Rect2(-28, -10 + b, 58, 7), Config.C_IRON_DARK)
+		var y := top + 34.0 + i * 52.0
+		draw_rect(Rect2(-24, y, 34, 26), Config.C_WINDOW)
+		draw_rect(Rect2(-22, y + 2, 30, 22), Color(Config.C_FIRE, 0.30))
+		draw_circle(Vector2(-7, y + 16), 8, Config.C_FOE_DARK)
+		draw_circle(Vector2(-7, y + 8), 6, Config.C_FOE_SKIN.darkened(0.3))
+	# Fighting top, crowded with men.
+	var pt := top - 16.0
+	draw_rect(Rect2(-64, pt, 128, 18), dark)
+	draw_rect(Rect2(-64, pt, 128, 4), Color(Config.C_SAND_LIGHT, 0.16))
 	for i in range(5):
-		draw_rect(Rect2(-26 + i * 12, -3 + b, 9, 16), Color(Config.C_IRON, 0.55))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(28, -8 + b), Vector2(46, -24 + b), Vector2(53, -15 + b),
-		Vector2(39, -3 + b), Vector2(28, 5 + b),
-	]), Color("3a2a1c"))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(36, -18 + b), Vector2(48, -23 + b), Vector2(44, -12 + b),
-	]), Config.C_IRON)
-	draw_circle(Vector2(46, -19 + b), 3.0, Config.C_THREAT)
-	# Rider in lamellar
-	draw_circle(Vector2(-4, -28 + b), 14, Config.C_IRON_DARK)
-	for i in range(3):
-		draw_rect(Rect2(-17, -34 + b + i * 8, 26, 5), Color(Config.C_IRON, 0.8))
-	draw_circle(Vector2(-4, -48 + b), 10, Color("d9a372"))
-	draw_rect(Rect2(-14, -58 + b, 20, 11), Config.C_IRON_DARK)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-14, -58 + b), Vector2(6, -58 + b), Vector2(-4, -70 + b),
-	]), Config.C_IRON)
-	draw_line(Vector2(-4, -70 + b), Vector2(-4, -80 + b), Config.C_THREAT, 3.0)
-	# Lance couched forward
-	draw_line(Vector2(-24, -14 + b), Vector2(48, -30 + b), Config.C_WOOD, 4.0)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(48, -34 + b), Vector2(62, -30 + b), Vector2(48, -26 + b),
-	]), Config.C_IRON)
-
-
-## Sapper hauling a powder charge. Killing him near your line is a mistake.
-func _draw_sapper() -> void:
-	var b := _bob()
-	var fuse := 0.5 + 0.5 * sin(_anim * 3.0)
-	_legs(2, Color("2b1f14"))
-	draw_circle(Vector2(0, -12 + b), 15, Color("3f3226"))
-	draw_circle(Vector2(-4, -15 + b), 10, Color("4c3d2d"))
-	draw_circle(Vector2(0, -32 + b), 10, Color("d9a372"))
-	# Rag over the face
-	draw_rect(Rect2(-10, -32 + b, 20, 7), Color("6d5a45"))
-	draw_circle(Vector2(0, -38 + b), 10, Color("2b1f14"))
-	# The charge, slung under one arm
-	draw_circle(Vector2(15, -8 + b), 13, Config.C_IRON_DARK)
-	draw_circle(Vector2(12, -11 + b), 7, Color(Config.C_IRON, 0.5))
-	draw_rect(Rect2(10, -22 + b, 10, 6), Config.C_WOOD_DARK)
-	# Lit fuse, sparking
-	draw_line(Vector2(15, -22 + b), Vector2(22, -34 + b), Config.C_WOOD_DARK, 2.0)
-	draw_circle(Vector2(22, -34 + b), 3.5 * fuse + 1.5, Color(Config.C_FIRE, 0.35))
-	draw_circle(Vector2(22, -34 + b), 2.2 * fuse + 1.0, Config.C_FIRE_HOT)
-
-
-## Shaman with a drum: heals the column while it climbs.
-func _draw_shaman() -> void:
-	var b := _bob() * 0.8
-	var pulse := 0.5 + 0.5 * sin(_anim * 1.3)
-	draw_circle(Vector2(0, -14 + b), radius * 1.5, Color(Config.C_GOOD, 0.07 + 0.05 * pulse))
-	_legs(4, Color("2b1f14"))
-	# Long robe
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-16, 8), Vector2(16, 8), Vector2(11, -26 + b), Vector2(-11, -26 + b),
-	]), Color("5a4a6b"))
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-16, 8), Vector2(-2, 8), Vector2(-4, -26 + b), Vector2(-11, -26 + b),
-	]), Color("6d5c80"))
-	draw_circle(Vector2(0, -34 + b), 10, Color("d9a372"))
-	# Antlered headdress
-	draw_circle(Vector2(0, -40 + b), 10, Color("3a2a1c"))
-	for sx in [-1.0, 1.0]:
-		draw_line(Vector2(sx * 6, -46 + b), Vector2(sx * 15, -62 + b), Color("d8cbb0"), 2.5)
-		draw_line(Vector2(sx * 11, -54 + b), Vector2(sx * 21, -56 + b), Color("d8cbb0"), 2.0)
-	# Frame drum, struck on the beat
-	var beat := 1.0 + 0.12 * sin(_anim * 3.0)
-	draw_circle(Vector2(16, -18 + b), 15 * beat, Config.C_WOOD_DARK)
-	draw_circle(Vector2(16, -18 + b), 12 * beat, Color("c8ab84"))
-	draw_arc(Vector2(16, -18 + b), 12 * beat, 0, TAU, 18, Config.C_WOOD_DARK, 1.5)
-	draw_line(Vector2(-14, -20 + b), Vector2(4, -14 + b + sin(_anim * 3.0) * 4.0), Config.C_WOOD, 2.5)
+		draw_rect(Rect2(-62 + i * 28, pt - 12, 15, 13), dark)
+	for hx in [-34.0, -2.0, 30.0]:
+		draw_circle(Vector2(hx, pt - 12), 8, Config.C_FOE_BODY)
+		draw_circle(Vector2(hx + 2, pt - 24), 7.5, Config.C_FOE_SKIN)
+		draw_circle(Vector2(hx + 2, pt - 29), 7.5, Config.C_FOE_DARK)
+		draw_line(Vector2(hx - 7, pt - 4), Vector2(hx - 11, pt - 44), Config.C_IRON_DARK, 2.5)
+	# The boarding ramp, already coming down.
+	var drop := 0.55 + 0.12 * sin(_anim * 0.7)
+	var hinge := Vector2(50, pt + 6)
+	var tip := hinge + Vector2(cos(-drop), sin(-drop)) * 62.0
+	draw_line(hinge, tip, timber.lightened(0.05), 11.0)
+	draw_line(hinge, tip, dark, 3.0)
+	draw_line(hinge + Vector2(-6, -10), tip, Color("6b5a44"), 2.0)
+	# Signal fire and banners.
+	var f := 1.0 + sin(_anim * 4.0) * 0.22
+	draw_circle(Vector2(-2, pt - 40), 18 * f, Color(Config.C_FIRE, 0.22))
+	draw_circle(Vector2(-2, pt - 42), 9 * f, Config.C_FIRE)
+	draw_circle(Vector2(-2, pt - 46), 4.5 * f, Config.C_FIRE_HOT)
+	for bx in [-56.0, 56.0]:
+		draw_line(Vector2(bx, pt + 16), Vector2(bx, pt - 76), dark, 4.5)
+		var flap := sin(_anim * 1.4 + bx) * 5.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(bx, pt - 76), Vector2(bx + 38, pt - 62 + flap), Vector2(bx, pt - 44),
+		]), Config.C_FOE_CLOTH)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(bx, pt - 76), Vector2(bx + 18, pt - 69 + flap * 0.5), Vector2(bx, pt - 58),
+		]), Config.C_FOE_CLOTH_DARK)
 
 
 ## Manjaniq: a crewed stone-thrower that shells your emplacements from range.
@@ -632,22 +997,22 @@ func _draw_catapult() -> void:
 	var wob := sin(_anim * 0.6) * 1.2
 	var fired := clampf(_attack_cd * 1.2, 0.0, 1.0)
 	for wx in [-30.0, 30.0]:
-		draw_circle(Vector2(wx, 20), 14, Config.C_WOOD_DARK)
-		draw_circle(Vector2(wx, 20), 9, Config.C_WOOD)
+		draw_circle(Vector2(wx, 20), 14, Config.C_FOE_TIMBER_DARK)
+		draw_circle(Vector2(wx, 20), 9, Config.C_FOE_TIMBER)
 		var a := _anim * 0.4
 		draw_line(Vector2(wx, 20) + Vector2(cos(a), sin(a)) * 9,
-			Vector2(wx, 20) - Vector2(cos(a), sin(a)) * 9, Config.C_WOOD_DARK, 2.5)
+			Vector2(wx, 20) - Vector2(cos(a), sin(a)) * 9, Config.C_FOE_TIMBER_DARK, 2.5)
 	# Frame
-	draw_rect(Rect2(-40, -6 + wob, 80, 22), Config.C_WOOD)
-	draw_rect(Rect2(-40, -6 + wob, 80, 6), Config.C_WOOD_DARK)
-	draw_line(Vector2(-22, -6 + wob), Vector2(0, -48 + wob), Config.C_WOOD_DARK, 6.0)
-	draw_line(Vector2(22, -6 + wob), Vector2(0, -48 + wob), Config.C_WOOD_DARK, 6.0)
+	draw_rect(Rect2(-40, -6 + wob, 80, 22), Config.C_FOE_TIMBER)
+	draw_rect(Rect2(-40, -6 + wob, 80, 6), Config.C_FOE_TIMBER_DARK)
+	draw_line(Vector2(-22, -6 + wob), Vector2(0, -48 + wob), Config.C_FOE_TIMBER_DARK, 6.0)
+	draw_line(Vector2(22, -6 + wob), Vector2(0, -48 + wob), Config.C_FOE_TIMBER_DARK, 6.0)
 	# Throwing arm: down after a shot, cocked back as it reloads
 	var arm_a := lerpf(-2.5, -0.7, fired)
 	var pivot := Vector2(0, -46 + wob)
 	var tip := pivot + Vector2(cos(arm_a), sin(arm_a)) * 46.0
-	draw_line(pivot, tip, Config.C_WOOD, 7.0)
-	draw_line(pivot, pivot - Vector2(cos(arm_a), sin(arm_a)) * 18.0, Config.C_WOOD_DARK, 9.0)
+	draw_line(pivot, tip, Config.C_FOE_TIMBER, 7.0)
+	draw_line(pivot, pivot - Vector2(cos(arm_a), sin(arm_a)) * 18.0, Config.C_FOE_TIMBER_DARK, 9.0)
 	# Counterweight
 	draw_circle(pivot - Vector2(cos(arm_a), sin(arm_a)) * 22.0, 11, Config.C_IRON_DARK)
 	# Sling and stone, only while loaded
@@ -655,7 +1020,19 @@ func _draw_catapult() -> void:
 		draw_line(tip, tip + Vector2(6, 18), Config.C_SAND_LIGHT, 1.5)
 		draw_circle(tip + Vector2(6, 22), 8, Color("8a8580"))
 	draw_circle(pivot, 6, Config.C_IRON)
-	# Crew hauling the ropes
-	for cx in [-30.0, 32.0]:
-		draw_circle(Vector2(cx, -18 + wob), 8, Color("4a3222"))
-		draw_circle(Vector2(cx, -30 + wob), 6, Color("d9a372"))
+	# Crew hauling the ropes. Two stacked circles read as pebbles; these at
+	# least lean into the pull.
+	for spec in [[-32.0, 1.0], [34.0, -1.0]]:
+		var cx: float = spec[0]
+		var face: float = spec[1]
+		var pull := sin(_anim * 0.9 + cx) * 3.0
+		var base := Vector2(cx + pull * face, 14 + wob)
+		draw_line(base + Vector2(-4, 0), base + Vector2(-7, -14), Config.C_FOE_DARK, 5.0)
+		draw_line(base + Vector2(4, 0), base + Vector2(6, -14), Config.C_FOE_DARK, 5.0)
+		draw_colored_polygon(PackedVector2Array([
+			base + Vector2(-8, -12), base + Vector2(8, -12),
+			base + Vector2(9 * face, -32), base + Vector2(-5 * face, -32),
+		]), Config.C_FOE_BODY)
+		draw_circle(base + Vector2(2 * face, -38), 8.5, Config.C_FOE_SKIN)
+		draw_circle(base + Vector2(2 * face, -42), 8.0, Config.C_FOE_DARK)
+		draw_line(base + Vector2(4 * face, -30), Vector2(0, -42 + wob), Color("c8b48c"), 2.0)

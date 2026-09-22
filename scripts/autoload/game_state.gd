@@ -28,10 +28,14 @@ var booth_mode: bool = false
 var sim_mode: bool = false
 var last_result: Dictionary = {}
 var run_seed: int = 0        # 0 = the authored campaign map
+## Fixed draft seed for --sim runs. Override with --boonseed=N to sweep.
+var sim_boon_seed: int = 1258
 var daily_index: int = 0
 
 var combo: int = 0
 var best_combo: int = 0
+## Whether the player pulled the repeater's trigger during the current wave.
+var _fired_this_wave: bool = false
 var repairs: int = 0
 var _combo_timer: float = 0.0
 
@@ -50,6 +54,8 @@ func _read_launch_flags() -> void:
 			mode = Config.Mode.FREE
 		if a == "--daily":
 			mode = Config.Mode.DAILY
+		if a.begins_with("--boonseed="):
+			sim_boon_seed = int(a.substr(11))
 	if OS.has_feature("web"):
 		var q: Variant = JavaScriptBridge.eval("window.location.search", true)
 		if q is String and (q as String).contains("mode=booth"):
@@ -94,16 +100,32 @@ func new_run(new_mode: int = -1) -> void:
 			run_seed = randi_range(100000, 9999999)
 		_:
 			run_seed = 0
-	Boons.reset(run_seed if run_seed != 0 else randi())
+	# The campaign has no map seed, so the boon draft would normally roll fresh
+	# every run. That makes the balance bot non-reproducible: the same strategy
+	# can clear wave 5 or wave 10 depending on what it was offered. Under --sim
+	# the draft is pinned, so a number in the README is a number you can check.
+	var boon_seed := run_seed
+	if boon_seed == 0:
+		boon_seed = sim_boon_seed if sim_mode else randi()
+	Boons.reset(boon_seed)
+	Meta.begin_run()
 	var m: Dictionary = Config.MODES[mode]
 	rock = int(m["rock"])
 	lives = int(m["lives"])
+	# The commander is chosen before the run and sits underneath every boon
+	# drafted later, so it is folded in here, before the first wave.
+	var cmd := Meta.apply_commander()
+	rock = maxi(0, rock + int(cmd.get("rock", 0)))
+	lives = maxi(1, lives + int(cmd.get("lives", 0)))
 	max_lives = lives
+	if mode == Config.Mode.DAILY:
+		Meta.track("daily_runs")
 	wave = 0
 	waves_cleared = 0
 	rock_earned = 0
 	kills = 0
 	combo = 0
+	_fired_this_wave = false
 	best_combo = 0
 	repairs = 0
 	_combo_timer = 0.0
@@ -131,12 +153,19 @@ func tick(delta: float) -> void:
 			combo_changed.emit(0)
 
 
+## The commander pulled the trigger this wave; the "quiet" contract is off.
+func note_commander_fired() -> void:
+	_fired_this_wave = true
+
+
 func register_kill() -> int:
 	kills += 1
 	combo += 1
 	best_combo = maxi(best_combo, combo)
 	_combo_timer = Config.COMBO_WINDOW
 	combo_changed.emit(combo)
+	Meta.track("kills")
+	Meta.track("streak", combo, "max")
 	return combo
 
 
@@ -178,6 +207,18 @@ func set_wave(w: int) -> void:
 
 func wave_cleared() -> void:
 	waves_cleared = wave
+	Meta.track("waves")
+	# "Flawless" and "quiet" are streaks, not totals: a wave that costs a life
+	# or that the player shot their way through resets the count to zero.
+	if lives >= max_lives:
+		Meta.track("flawless_waves")
+	else:
+		Meta.run_stats["flawless_waves"] = 0
+	if not _fired_this_wave:
+		Meta.track("quiet_waves")
+	else:
+		Meta.run_stats["quiet_waves"] = 0
+	_fired_this_wave = false
 	add_rock(Boons.wave_bonus(Config.wave_clear_bonus(wave)))
 	if not is_endless() and wave >= Config.WAVE_COUNT:
 		end_run(true)
@@ -240,7 +281,11 @@ func end_run(did_win: bool) -> void:
 		"kills": kills, "duration": run_time, "best_combo": best_combo,
 		"mode": mode, "mode_id": mode_id(), "seed": run_seed, "daily": daily_index,
 		"boons": Boons.taken.duplicate(), "emoji": Boons.emoji_line(),
+		"commander": Meta.commander,
 	}
 	if not sim_mode:
 		last_result["new_best"] = Save.record_run(last_result)
+		# Renown is paid after the profile records the run, so a new personal
+		# best is already known and can be worth something.
+		last_result["meta"] = Meta.end_run(last_result)
 	run_ended.emit(last_result)
