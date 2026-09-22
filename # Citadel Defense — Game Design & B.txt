@@ -1,0 +1,264 @@
+# Citadel Defense — Game Design & Build Spec
+
+**Working title:** Citadel Defense (Kurdish name TBD — see Open Questions)
+**Target:** Playable build for HITEX, Erbil International Fairground
+**Team:** 2 core (expanding to 3–5), plus external support for 3D printing and booth build
+**Status:** Design locked, not started
+
+---
+
+## 1. What this is
+
+A short, polished tower defense game set on the Erbil Citadel. The player defends the Citadel gate against waves of Mongol attackers climbing the mound.
+
+It exists to do one job: **make people walk across an exhibition hall, play for ninety seconds, download the app, and leave holding a 3D printed tower.**
+
+Everything in this spec is subordinate to that. If a feature does not make someone stop walking, play, or post about it, it is cut.
+
+### Assumptions made (change these if wrong)
+
+- **Engine:** Phaser 3 + TypeScript + Vite. Web-based, so it runs on phones via browser and on the booth screen with no app store review. No store approval risk three weeks out.
+- **Primary input:** touch. The booth machine runs the same touch build on a tablet or touchscreen. No joystick/arcade-button variant in v1 — that is a second control scheme and doubles testing.
+- **Orientation:** portrait. Matches phones, and a vertical screen at the booth looks more like an arcade cabinet than a TV.
+
+---
+
+## 2. Hard constraints
+
+| Constraint | Reality |
+|---|---|
+| Time | ~3 weeks of calendar, far less of actual working time |
+| Competing commitments | Wedding, house move, day job |
+| Team | 2 people coding |
+| Booth | Last-minute, possibly free, size unknown |
+| Art | No dedicated artist; asset packs + commissioned pieces |
+
+**Design consequence:** this is a *small* game built to a high finish. One map. Three towers. Ten waves. The quality budget goes into feel — hit feedback, sound, the moment a wave breaks — not into content volume.
+
+---
+
+## 3. Core loop
+
+1. Wave incoming — short countdown, visible enemy preview
+2. Player places/upgrades towers along the path using **Rock** (currency)
+3. Wave spawns, walks the path toward the gate
+4. Kills drop Rock
+5. Enemies that reach the gate cost a Life
+6. Repeat for 10 waves; wave 10 is the boss
+7. Score screen → leaderboard → QR
+
+Target session: **90–150 seconds** for a full run. This matters — at the booth, a queue has to keep moving.
+
+---
+
+## 4. The map
+
+Single map. One path. The path winds up the Citadel mound from the base to the main gate at the top of the screen.
+
+- Fixed tower slots along the path (not free placement). Roughly 10–12 slots.
+  - *Why:* fixed slots remove pathfinding entirely, remove blocking exploits, and make the game readable in two seconds by someone watching over a shoulder. Free placement is a v2 problem.
+- The gate is at the top. It visibly takes damage as lives are lost — cracks, then smoke, then breach.
+- Background: the Citadel silhouette, the mound, the plain below.
+
+---
+
+## 5. Towers
+
+Three types. Each answers a different threat, so the player has to think but never for long.
+
+| Tower | Cost | Damage | Rate | Range | Role |
+|---|---|---|---|---|---|
+| **Archer** | 50 | Low | Fast | Medium | Workhorse. Melts unarmoured swarms. Weak vs armour. |
+| **Oil Pot** | 75 | Medium AoE | Slow | Short | Splash. Punishes tight groups. Placed on corners. |
+| **Ballista** | 120 | Very high | Very slow | Long | Single target. The only real answer to armoured/boss units. |
+
+**Upgrades:** each tower has 2 upgrade levels (so 3 tiers total). Cost roughly 1.5x, effect roughly 1.8x. Visually distinct at each tier — this matters for the printed giveaways (see §11).
+
+**Sell:** returns 60% of invested Rock. Needed so a bad early placement doesn't kill a booth run.
+
+---
+
+## 6. Enemies
+
+| Enemy | HP | Speed | Armour | Notes |
+|---|---|---|---|---|
+| **Raider** | Low | Medium | None | Basic fodder, arrives in numbers |
+| **Runner** | Very low | Fast | None | Punishes gaps in coverage |
+| **Shieldman** | High | Slow | Heavy | Archers barely scratch it — forces Ballista |
+| **Siege Cart** | Very high | Very slow | Medium | Takes 2 lives if it lands. Wave 7 and 10 only. |
+| **Boss: Siege Tower** | Huge | Slow | Heavy | Wave 10. Spawns Raiders as it advances. |
+
+Keep it to these five. Each one teaches a lesson; nothing is decorative.
+
+---
+
+## 7. Wave table
+
+| Wave | Composition | Purpose |
+|---|---|---|
+| 1 | 6 Raiders | Teach placement |
+| 2 | 10 Raiders | Build economy |
+| 3 | 8 Raiders, 4 Runners | Teach coverage gaps |
+| 4 | 12 Raiders, 6 Runners | Pressure |
+| 5 | 2 Shieldmen, 8 Raiders | Teach armour → Ballista |
+| 6 | 14 Raiders, 8 Runners | Breathing room, bank Rock |
+| 7 | 1 Siege Cart, 3 Shieldmen, 10 Raiders | First real threat |
+| 8 | 4 Shieldmen, 12 Raiders, 10 Runners | Mixed |
+| 9 | 2 Siege Carts, 5 Shieldmen, 15 Raiders | Pre-boss spike |
+| 10 | **Siege Tower** + continuous Raiders | Boss |
+
+Tune so a first-time player loses around wave 7–8, and a second run can clear it. **This is deliberate** — one loss creates the "let me try again" that keeps them at the booth, and the second run is when they download.
+
+---
+
+## 8. Economy & fail state
+
+- Starting Rock: **150** (enough for 3 Archers, or 2 Archers + partial save)
+- Kill rewards: Raider 8, Runner 6, Shieldman 25, Siege Cart 60, Boss 200
+- Wave clear bonus: 20 + (wave × 5)
+- **Lives: 3.** Siege Cart costs 2. Boss reaching the gate = instant loss.
+
+Scoring: `(Rock earned) + (lives remaining × 500) + (waves cleared × 250) + speed bonus`
+
+Lives-remaining weighting is heavy on purpose — it makes perfect runs meaningfully higher on the leaderboard than lucky ones.
+
+---
+
+## 9. Controls
+
+Touch only in v1.
+
+- Tap an empty slot → radial menu of 3 towers with costs
+- Tap an existing tower → upgrade / sell
+- Tap the speed button → 1x / 2x toggle (important for queue throughput at the booth)
+- No pause in booth mode
+
+**Booth mode** (a URL flag, e.g. `?mode=booth`): no pause, auto-restart after 20s idle on the score screen, leaderboard attract loop when nobody is playing.
+
+---
+
+## 10. Leaderboard & the QR loop
+
+This is the part that converts attention into downloads, so it gets real attention.
+
+**Flow at the booth:**
+1. Player finishes a run
+2. Score screen: enter name (3–12 chars), see rank
+3. If top 10 → QR code appears on the booth screen
+4. Player scans → opens the game on their phone
+5. They claim their leaderboard entry on their phone (links score to their install)
+6. Staff scans *their* screen to confirm and hands over the printed tower
+
+**Technical:** small backend — leaderboard POST/GET, rate limited, name profanity filter (Kurdish, Arabic, English). Daily reset plus an all-time board. Do not over-build this; a single table with a score endpoint is enough.
+
+**Anti-abuse:** score submitted with a run hash; reject impossible scores server-side. Someone *will* try. Keep it simple but not trivially spoofable.
+
+**Attract loop:** when idle, the booth screen cycles the top 10 with names large. People look for their friends' names. This is free marketing standing in your booth.
+
+---
+
+## 11. 3D printed giveaways
+
+The print should be **a tower from the game**, not a generic trophy. The object in their hand is a piece of the thing they just played.
+
+- 3 designs: Archer tower, Oil Pot, Ballista
+- Small — 40–60mm, keychain loop, fast print, low filament cost
+- Tier 3 visual design of each tower is what gets modelled (most detailed silhouette)
+- Collectability is the hook: three designs means people come back to play again for a different one
+
+**Print budget check needed:** at ~15 min/print per unit and N printers running, calculate realistic daily output before promising anyone anything. This is a hard capacity constraint, not a detail. Decide the daily cap and make the rule public at the booth ("first 50 today") so nobody is disappointed.
+
+---
+
+## 12. Art direction
+
+**2D, not 3D.** Modelling, lighting and animating 3D in three weeks while also building the game is how the polish dies.
+
+- Clean, bold, high-contrast shapes — must read on a large screen from 10+ metres
+- Limited palette: sandstone/ochre for the Citadel, deep blue night sky, red for threat
+- Towers and enemies silhouette-distinct at small size
+- Source: asset packs (Kenney, itch.io) as a base, commissioned or adjusted for the Citadel-specific pieces
+- The Citadel silhouette itself is the one asset worth paying for — it's the thing that makes people say "that's ours"
+
+**Historical framing:** the Mongol sieges are real local history. The framing is defence, resilience, holding the Citadel. Keep it respectful — no gore, no comedy at the expense of it. This will be seen by government people.
+
+---
+
+## 13. Audio
+
+Underrated and cheap. A game with good sound feels twice as finished.
+
+- Kurdish-flavoured instrumentation for the menu and between waves (daf, zurna, saz textures)
+- Distinct hit sounds per tower — the Ballista needs a *thunk* people feel
+- Wave-break sting when the last enemy of a wave dies
+- Gate-damage sound that is genuinely alarming
+- Booth volume must be loud enough to carry, not so loud it annoys neighbours
+
+---
+
+## 14. Build plan
+
+**Week 1 — playable**
+- Project setup, Phaser + TS + Vite
+- Path, slots, one tower, one enemy, spawning, shooting, dying
+- Rock economy, lives, win/lose
+- Playable ugly end-to-end run
+
+**Week 2 — complete**
+- All 3 towers + upgrades, all 5 enemy types, full 10-wave table
+- Art pass, audio pass
+- Score screen, leaderboard backend, QR flow
+- Booth mode
+
+**Week 3 — polish and harden**
+- Balance tuning on real players (not on yourselves — you will be too good at it)
+- Hit feedback, screen shake, particles, juice
+- Device testing: cheap Android phones, not just yours
+- Offline fallback for the booth (venue wifi will fail — assume it)
+- Load test the leaderboard
+
+**Test with strangers before HITEX.** Your friends will be polite. Find people who are not invested.
+
+---
+
+## 15. Cut list (in order)
+
+If time runs out, cut in this order. Decide now so you don't argue about it at 2am:
+
+1. All-time leaderboard (daily only)
+2. Tower tier 3 (two tiers only)
+3. Siege Cart enemy
+4. 2x speed toggle
+5. Upgrades entirely (flat towers, adjust economy)
+
+**Never cut:** the 10-wave arc, the boss, sound, the QR flow. Those are the product.
+
+---
+
+## 16. Risks
+
+| Risk | Mitigation |
+|---|---|
+| Venue wifi fails | Game runs fully offline; leaderboard queues locally and syncs |
+| Print capacity can't meet demand | Public daily cap, announced at the booth |
+| Booth falls through (last-minute deal) | Game still ships as a phone release; booth is upside, not the plan |
+| Time collapses (wedding, move) | Cut list above, executed without debate |
+| Nobody can model the towers | Commission the three models early — it's cheap and it's on the critical path |
+
+---
+
+## 17. Open questions
+
+1. **Name.** Kurdish name, ideally one that works spoken in Kurdish, Arabic and English. This should be decided in week 1 because it gates the domain, the app listing, the booth signage and the print.
+2. Booth size and screen size — determines UI scale and whether one machine or two.
+3. Web-only, or also a wrapped app store build? (Store review timing is a risk; web-only is safer for HITEX.)
+4. Who owns the leaderboard backend after the event — does it stay live?
+5. Is the game the company's first product, or a standalone? (Affects branding on the score screen.)
+
+---
+
+## 18. Note on scope
+
+The single biggest failure mode here is not technical. It is adding "just one more thing" — a second map, a multiplayer mode, a story. Every one of those turns a finished small game into an unfinished big one.
+
+A tiny game that feels excellent beats an ambitious game that feels rough, especially on a booth where the average person plays for ninety seconds and judges it in five.
